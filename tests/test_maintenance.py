@@ -22,7 +22,7 @@ class FakeRunner:
         self.calls.append(argv)
         self.snapshots.append(sorted(str(path.relative_to(kwargs["cwd"])) for path in Path(kwargs["cwd"]).rglob("*") if path.is_file()))
         self.assert_safe(kwargs)
-        key = (argv[0], argv[1] if argv[0] in {"npm", "trivy"} else "")
+        key = (argv[0], argv[1] if argv[0] in {"npm", "trivy"} else "outdated" if "--outdated" in argv else "")
         value = self.outputs.get(key, FileNotFoundError())
         if isinstance(value, Exception):
             raise value
@@ -235,6 +235,67 @@ class MaintenanceTest(unittest.TestCase):
         report = scan(self.repo, self.output, runner=runner)
         self.assertEqual(self.category(report, "secret_scan")[0]["status"], "error")
         self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_trusted_environment_metadata_audits_full_pinned_inventory_and_checks_updates(self):
+        self.commit({"main.py": "pass\n"})
+        outputs = {("/trusted/python", ""): (0, [{"name": "example", "version": "1.0"}, {"name": "transitive", "version": "2.0"}]),
+                   ("/trusted/python", "outdated"): (0, [{"name": "example", "version": "1.0", "latest_version": "1.1", "secret": "PRIVATE"}]),
+                   ("pip-audit", ""): (0, {"dependencies": [{"name": "example", "vulns": []}, {"name": "transitive", "vulns": []}]})}
+        class InspectRunner(FakeRunner):
+            def __call__(self, argv, **kwargs):
+                if argv[0] == "pip-audit":
+                    content = (Path(kwargs["cwd"]) / argv[argv.index("--requirement") + 1]).read_text()
+                    assert content == "example==1.0\ntransitive==2.0\n"
+                return super().__call__(argv, **kwargs)
+        runner = InspectRunner(outputs)
+        report = scan(self.repo, self.output, runner=runner, environment_python=Path("/trusted/python"))
+        self.assertEqual(self.category(report, "python_transitive")[0]["status"], "clean")
+        updates = self.category(report, "python_versions")[0]
+        self.assertEqual(updates["status"], "findings")
+        self.assertEqual(updates["findings"], [{"package": "example"}])
+        for call in runner.calls:
+            if call[0] == "/trusted/python":
+                self.assertEqual(call[1:5], ["-I", "-m", "pip", "list"])
+                self.assertIn("--disable-pip-version-check", call)
+        self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_environment_errors_and_unsafe_package_metadata_are_explicit(self):
+        self.commit({"main.py": "pass\n"})
+        for value, expected in [((1, []), "error"), ((0, [{"name": "PRIVATE\n-r /secret", "version": "1"}]), "error"),
+                                (FileNotFoundError(), "unavailable"), (subprocess.TimeoutExpired([], 1), "error")]:
+            with self.subTest(expected=expected):
+                runner = FakeRunner({("/trusted/python", ""): value, ("/trusted/python", "outdated"): value})
+                report = scan(self.repo, self.output, runner=runner, environment_python=Path("/trusted/python"))
+                self.assertEqual(self.category(report, "python_transitive")[0]["status"], expected)
+                self.assertEqual(self.category(report, "python_versions")[0]["status"], expected)
+                self.assertNotIn("PRIVATE", json.dumps(report))
+                self.assertFalse([call for call in runner.calls if call[0] == "pip-audit"])
+
+    def test_environment_interpreter_is_never_automatically_discovered(self):
+        self.commit({"main.py": "pass\n"})
+        (self.repo / ".venv" / "bin").mkdir(parents=True)
+        (self.repo / ".venv" / "bin" / "python").write_text("PRIVATE executable")
+        runner = FakeRunner()
+        scan(self.repo, self.output, runner=runner)
+        self.assertFalse(any("-I" in call for call in runner.calls))
+
+    def test_semgrep_javascript_scans_only_snapshot_and_reports_rule_id(self):
+        self.commit({"app/main.ts": "const synthetic = 1;\n"})
+        runner = FakeRunner({("semgrep", ""): (0, {"results": [{"check_id": "javascript.security.audit.synthetic", "extra": {"lines": "PRIVATE SOURCE"}, "path": "PRIVATE PATH"}], "errors": []})})
+        report = scan(self.repo, self.output, runner=runner)
+        check = self.category(report, "code_security_javascript")[0]
+        self.assertEqual(check["status"], "findings")
+        self.assertEqual(check["findings"], [{"id": "SEMGREP-javascript.security.audit.synthetic"}])
+        call = next(call for call in runner.calls if call[0] == "semgrep")
+        self.assertIn("--config=p/security-audit", call)
+        self.assertIn("--metrics=off", call)
+        self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_semgrep_missing_and_rule_errors_are_incomplete(self):
+        self.commit({"app/main.ts": "const synthetic = 1;\n"})
+        for output, expected in [(FileNotFoundError(), "unavailable"), ((0, {"results": [], "errors": ["PRIVATE"]}), "error")]:
+            report = scan(self.repo, self.output, runner=FakeRunner({("semgrep", ""): output}))
+            self.assertEqual(self.category(report, "code_security_javascript")[0]["status"], expected)
 
 
 if __name__ == "__main__":

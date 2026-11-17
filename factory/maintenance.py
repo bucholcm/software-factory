@@ -19,9 +19,9 @@ from typing import Callable, Mapping, Sequence
 TIMEOUT = 120
 REPORT_FILE = "maintenance.json"
 _PACKAGE = re.compile(r"(?:@[a-z0-9._-]+/)?[a-z0-9][a-z0-9._+-]{0,127}", re.I)
-_IDENTIFIER = re.compile(r"(?:CVE-\d{4}-\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|PYSEC-\d{4}-\d+|NPM-\d+|B\d{3}|AVD-[A-Z0-9-]+|GITLEAKS-[a-z0-9_-]{1,64})", re.I)
+_IDENTIFIER = re.compile(r"(?:CVE-\d{4}-\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|PYSEC-\d{4}-\d+|NPM-\d+|B\d{3}|AVD-[A-Z0-9-]+|GITLEAKS-[a-z0-9_-]{1,64}|SEMGREP-[a-z0-9_.-]{1,200})", re.I)
 _SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-_TOOLS = {"python": ("pip-audit",), "npm": ("npm",), "container": ("trivy",), "code": ("bandit",), "secrets": ("gitleaks",)}
+_TOOLS = {"python": ("pip-audit",), "npm": ("npm",), "container": ("trivy",), "code": ("bandit",), "secrets": ("gitleaks",), "javascript_code": ("semgrep",)}
 _STATUSES = {"clean", "findings", "unavailable", "not_applicable", "error"}
 
 
@@ -134,6 +134,70 @@ def _parse_bandit(payload):
     if any(not item for item in findings):
         raise ValueError
     return findings
+
+
+def _parse_semgrep(payload):
+    if payload.get("errors"):
+        raise ValueError
+    results = payload["results"]
+    if not isinstance(results, list):
+        raise ValueError
+    findings = [_finding(identifier=f"SEMGREP-{item['check_id']}") for item in results]
+    if any(not item for item in findings):
+        raise ValueError
+    return findings
+
+
+def _python_packages(payload, *, outdated=False):
+    if not isinstance(payload, list):
+        raise ValueError
+    result = []
+    for package in payload:
+        name, version = package["name"], package["version"]
+        versions = [version, package["latest_version"]] if outdated else [version]
+        if not isinstance(name, str) or not _PACKAGE.fullmatch(name) or any(
+            not isinstance(value, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.!+_-]*", value) for value in versions
+        ):
+            raise ValueError
+        result.append((name, version))
+    return result
+
+
+def _environment_checks(snapshot, runner, audit_command, interpreter):
+    # The caller explicitly trusts this interpreter. Never discover or execute
+    # an interpreter from an arbitrary scanned repository.
+    command = [str(interpreter), "-I", "-m", "pip", "list", "--format=json", "--disable-pip-version-check"]
+    checks = []
+    for outdated in (False, True):
+        category = "python_versions" if outdated else "python_transitive"
+        try:
+            result = _run(runner, [*command, "--outdated"] if outdated else command, snapshot)
+        except FileNotFoundError:
+            checks.append(_check(category, "pip", "unavailable", error_code="environment_python_missing"))
+            continue
+        except subprocess.TimeoutExpired:
+            checks.append(_check(category, "pip", "error", error_code="scan_timeout"))
+            continue
+        except OSError:
+            checks.append(_check(category, "pip", "error", error_code="scan_failed"))
+            continue
+        if result.returncode:
+            checks.append(_check(category, "pip", "error", error_code="scan_failed"))
+            continue
+        try:
+            packages = _python_packages(json.loads(result.stdout), outdated=outdated)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            checks.append(_check(category, "pip", "error", error_code="invalid_environment_inventory"))
+            continue
+        if outdated:
+            findings = [_finding(name) for name, _ in packages]
+            checks.append(_check(category, "pip", "findings" if findings else "clean", findings))
+        else:
+            path = snapshot / "factory-environment-requirements.txt"
+            path.write_text("\n".join(sorted({f"{name}=={version}" for name, version in packages})) + "\n")
+            checks.append(_scanner(category, "pip-audit", [*audit_command, "--requirement", path.name, "--format", "json",
+                                   "--progress-spinner", "off", "--disable-pip", "--no-deps"], snapshot, runner, _parse_python))
+    return checks
 
 
 def _scanner(category, tool, argv, cwd, runner, parser):
@@ -319,8 +383,11 @@ def _python_checks(snapshot, names, runner, command):
     return checks
 
 
-def _execute(snapshot, names, runner, commands):
+def _execute(snapshot, names, runner, commands, environment_python=None):
     checks = _python_checks(snapshot, names, runner, commands["python"])
+    if environment_python is not None:
+        checks = [check for check in checks if check["category"] not in {"python_transitive", "python_versions"}]
+        checks.extend(_environment_checks(snapshot, runner, commands["python"], environment_python))
     manifests = [name for name in names if PurePosixPath(name).name == "package.json"]
     if not manifests:
         checks.append(_check("npm_dependencies", "npm", "not_applicable"))
@@ -366,17 +433,22 @@ def _execute(snapshot, names, runner, commands):
     else:
         checks.append(_check("code_security", "bandit", "not_applicable"))
     if any(PurePosixPath(name).suffix in _SOURCE_SUFFIXES - {".py"} for name in names):
-        checks.append(_check("code_security_javascript", "bandit", "unavailable", error_code="unsupported_source_language"))
+        checks.append(_scanner("code_security_javascript", "semgrep", [*commands["javascript_code"], "scan", "--config=p/security-audit",
+                               "--json", "--quiet", "--metrics=off", "."], snapshot, runner, _parse_semgrep))
     checks.append(_secret_scanner(snapshot, runner, commands["secrets"]))
     return checks
 
 
 def scan(repo: Path, output_dir: Path, *, runner=subprocess.run,
-         commands: Mapping[str, Sequence[str]] | None = None) -> dict:
+         commands: Mapping[str, Sequence[str]] | None = None,
+         environment_python: Path | None = None) -> dict:
     """Run scanners on tracked HEAD, atomically replacing the sanitized report.
 
     ``runner`` has subprocess.run's interface. ``commands`` can replace the
-    executable prefix for python/npm/container/code/secrets adapters. No shell is used.
+    executable prefix for python/npm/container/code/secrets/javascript_code adapters.
+    ``environment_python`` explicitly trusts an interpreter for isolated pip
+    inventory and outdated metadata queries; it is never auto-discovered.
+    No shell is used.
     Audit tools may contact advisory registries; this function never installs
     packages or executes project scripts. Missing/incomplete checks stay visible.
     """
@@ -388,7 +460,7 @@ def scan(repo: Path, output_dir: Path, *, runner=subprocess.run,
         with tempfile.TemporaryDirectory(prefix="factory-maintenance-") as temporary:
             snapshot = Path(temporary)
             report["revision"], names = _snapshot(Path(repo), snapshot, runner)
-            report["checks"] = _execute(snapshot, names, runner, configured)
+            report["checks"] = _execute(snapshot, names, runner, configured, environment_python)
     except (OSError, ValueError, TypeError, subprocess.SubprocessError):
         report["checks"] = [_check("inventory", "git", "error", error_code="inventory_failed")]
     statuses = {check["status"] for check in report["checks"]}
