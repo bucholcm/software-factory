@@ -153,6 +153,15 @@ def _python_packages(payload, *, outdated=False):
         raise ValueError
     result = []
     for package in payload:
+        if not isinstance(package, dict):
+            raise ValueError
+        # Editable project metadata is not a registry identity. Even when pip
+        # unexpectedly returns it despite --exclude-editable, never audit a
+        # namesake registry distribution or expose its local filesystem path.
+        source = package.get("direct_url", {})
+        if ("editable_project_location" in package
+                or (isinstance(source, dict) and str(source.get("url", "")).startswith("file:"))):
+            continue
         name, version = package["name"], package["version"]
         versions = [version, package["latest_version"]] if outdated else [version]
         if not isinstance(name, str) or not _PACKAGE.fullmatch(name) or any(
@@ -166,7 +175,7 @@ def _python_packages(payload, *, outdated=False):
 def _environment_checks(snapshot, runner, audit_command, interpreter):
     # The caller explicitly trusts this interpreter. Never discover or execute
     # an interpreter from an arbitrary scanned repository.
-    command = [str(interpreter), "-I", "-m", "pip", "list", "--format=json", "--disable-pip-version-check"]
+    command = [str(interpreter), "-I", "-m", "pip", "list", "--format=json", "--disable-pip-version-check", "--exclude-editable"]
     checks = []
     for outdated in (False, True):
         category = "python_versions" if outdated else "python_transitive"

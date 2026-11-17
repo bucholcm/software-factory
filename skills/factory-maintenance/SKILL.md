@@ -23,6 +23,10 @@ the runner uses isolated `pip list` metadata and `pip list --outdated` queries,
 never installs packages or imports application code. Without this configuration,
 Python version-update checks remain unavailable. Docker tag/digest update checks
 remain explicitly unavailable until an update-checker adapter is configured.
+Both pip queries exclude editable projects; explicit local-project metadata is
+also filtered defensively before registry audits or update reporting. Local
+projects are covered by the separate source-scanner checks, whose actual results
+remain visible; registry findings for a namesake package do not apply to them.
 Do not interpret a clean vulnerability scan as evidence that versions are current.
 
 Secret scanning uses Gitleaks on the same approved tracked source/manifests,

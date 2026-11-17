@@ -279,6 +279,33 @@ class MaintenanceTest(unittest.TestCase):
         scan(self.repo, self.output, runner=runner)
         self.assertFalse(any("-I" in call for call in runner.calls))
 
+    def test_editable_local_project_is_never_audited_as_a_registry_namesake(self):
+        self.commit({"main.py": "pass\n"})
+        local = {"name": "buchos", "version": "0.1.0", "editable_project_location": "/PRIVATE/synthetic-project"}
+        local_update = dict(local, latest_version="99.0")
+        local_file = {"name": "synthetic-local", "version": "local development", "direct_url": {"url": "file:///PRIVATE/synthetic-project"}}
+        outputs = {("/trusted/python", ""): (0, [local, local_file, {"name": "example", "version": "1.0"}]),
+                   ("/trusted/python", "outdated"): (0, [local_update, local_file]),
+                   ("pip-audit", ""): (0, {"dependencies": [{"name": "example", "vulns": []}]}),
+                   ("bandit", ""): (0, {"results": []})}
+        class InspectRunner(FakeRunner):
+            def __call__(self, argv, **kwargs):
+                if argv[0] == "pip-audit":
+                    content = (Path(kwargs["cwd"]) / argv[argv.index("--requirement") + 1]).read_text()
+                    assert content == "example==1.0\n"
+                    assert "buchos" not in content
+                return super().__call__(argv, **kwargs)
+        runner = InspectRunner(outputs)
+        report = scan(self.repo, self.output, runner=runner, environment_python=Path("/trusted/python"))
+        for call in runner.calls:
+            if call[0] == "/trusted/python":
+                self.assertIn("--exclude-editable", call)
+        self.assertEqual(self.category(report, "python_versions")[0]["status"], "clean")
+        self.assertEqual(self.category(report, "python_versions")[0]["findings"], [])
+        self.assertEqual(self.category(report, "code_security")[0]["status"], "clean")
+        self.assertNotIn("PRIVATE", json.dumps(report))
+        self.assertNotIn("buchos", json.dumps(report))
+
     def test_semgrep_javascript_scans_only_snapshot_and_reports_rule_id(self):
         self.commit({"app/main.ts": "const synthetic = 1;\n"})
         runner = FakeRunner({("semgrep", ""): (0, {"results": [{"check_id": "javascript.security.audit.synthetic", "extra": {"lines": "PRIVATE SOURCE"}, "path": "PRIVATE PATH"}], "errors": []})})
