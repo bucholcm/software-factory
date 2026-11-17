@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from factory.store import Store
 from factory.tracker import reconcile
+from factory.config import write_json
 
 
 class TrackerTests(unittest.TestCase):
@@ -15,7 +16,8 @@ class TrackerTests(unittest.TestCase):
         self.config = {"repo": self.tmp.name, "state_dir": str(Path(self.tmp.name) / "state"), "base_branch": "main"}
         self.store = Store(self.config["state_dir"])
         self.candidate = {"id": "pilot-1", "status": "open", "description": "Write documentation.",
-                          "acceptance_criteria": "Useful docs", "labels": ["factory-pilot", "ready-for-development"]}
+                          "acceptance_criteria": "Useful docs", "labels": ["factory-pilot", "ready-for-development"],
+                          "metadata": {"factory_paths": ["docs/pilot.md"]}}
         self.calls = []
 
     def fake_bd(self, config, *args, json_result=False):
@@ -24,6 +26,8 @@ class TrackerTests(unittest.TestCase):
             return []
         if args[0] == "ready":
             return [self.candidate]
+        if args[0] == "show":
+            return [{"id": args[1], "status": "in_progress", "metadata": {"factory_project": self.config["state_dir"]}}]
         return None
 
     def fake_enqueue(self, config, task_id, requirements, **kwargs):
@@ -72,6 +76,57 @@ class TrackerTests(unittest.TestCase):
             result = reconcile(self.config, self.store, self.fake_enqueue)
         self.assertEqual(result["status"], "at_global_capacity")
         reviews.assert_not_called()
+
+    def test_independent_pilot_work_continues_while_another_job_is_blocked(self):
+        job = self.store.enqueue("blocked-other", self.tmp.name, "factory/other", payload={"allowed_paths": ["docs/other.md"]})
+        self.store.update(job["id"], stage="blocked", blocker="external_service_unavailable", resume_stage="implementing")
+        with patch("factory.tracker.bd", side_effect=self.fake_bd), patch("factory.tracker.reviews_clear", return_value=True):
+            result = reconcile(self.config, self.store, self.fake_enqueue)
+        self.assertEqual(result["status"], "task_claimed")
+        self.assertEqual(self.store.get(job["id"])["stage"], "blocked")
+
+    def test_overlapping_scopes_do_not_start_while_blocked(self):
+        job = self.store.enqueue("blocked-other", self.tmp.name, "factory/other", payload={"allowed_paths": ["docs/pilot.md"]})
+        self.store.update(job["id"], stage="blocked", blocker="external_service_unavailable", resume_stage="implementing")
+        with patch("factory.tracker.bd", side_effect=self.fake_bd), patch("factory.tracker.reviews_clear", return_value=True):
+            result = reconcile(self.config, self.store, self.fake_enqueue)
+        self.assertEqual(result["status"], "pilot_scope_or_independence_required")
+        self.assertFalse(any("--claim" in call for call in self.calls))
+
+    def test_product_question_survives_sync_and_resumes_after_answer(self):
+        question_path = Path(self.tmp.name) / "question.json"
+        write_json(question_path, {"question": "Which label should the document use? Recommend Local factory; alternative Development factory."})
+        job = self.store.enqueue("question-task", self.tmp.name, "factory/question", payload={
+            "requirements": "Write docs.", "question_path": str(question_path), "allowed_paths": ["docs/question.md"]})
+        self.store.update(job["id"], stage="blocked", blocker="product_decision_required", resume_stage="implementing")
+        issue = {"id": "question-task", "status": "in_progress", "metadata": {"factory_project": self.config["state_dir"]}, "dependencies": []}
+        decision = {"id": "decision-1", "status": "open", "close_reason": ""}
+        calls = []
+        def fake(config, *args, json_result=False):
+            calls.append(args)
+            if args[0] == "show":
+                return [issue if args[1] == issue["id"] else decision]
+            if args[0] == "search":
+                return []
+            if args[0] == "create":
+                return decision
+            if args[:2] == ("dep", "add"):
+                issue["dependencies"] = [{"id": decision["id"], "dependency_type": "blocks"}]
+            if args[0] in {"list", "ready"}:
+                return []
+            return None
+        with patch("factory.tracker.bd", side_effect=fake):
+            reconcile(self.config, self.store, self.fake_enqueue)
+            waiting = self.store.get(job["id"])
+            self.assertEqual(waiting["stage"], "blocked")
+            self.assertEqual(waiting["payload"]["decision_id"], "decision-1")
+            decision.update(status="closed", close_reason="Use Local factory as the label.")
+            reconcile(self.config, self.store, self.fake_enqueue)
+        resumed = self.store.get(job["id"])
+        self.assertEqual(resumed["stage"], "implementing")
+        self.assertIn("Use Local factory as the label.", resumed["payload"]["requirements"])
+        self.assertEqual(sum(call[0] == "create" for call in calls), 1)
+        self.assertIn(("dep", "add", "question-task", "decision-1"), calls)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import shlex
 import signal
 import subprocess
 import sys
@@ -135,21 +134,23 @@ class Supervisor:
     def _find_launch(spec_path: Path):
         """Find a wrapper launched immediately before its parent crashed."""
         try:
-            result = subprocess.run(["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, timeout=5)
+            result = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True, timeout=5)
             if result.returncode:
                 return None
+            # ps joins argv with spaces without shell quoting. Splitting that
+            # representation destroys spec paths such as Application Support.
+            # Our wrapper has one fixed argv prefix and the known full spec path
+            # as its final argument, so match that exact suffix instead.
+            wrapper_suffix = " -m factory.worker --spec " + str(spec_path)
             for line in result.stdout.splitlines():
                 try:
                     value, command = line.strip().split(None, 1)
-                    argv = shlex.split(command)
-                    if "factory.worker" in argv and "--spec" in argv:
-                        index = argv.index("--spec")
-                        if index + 1 < len(argv) and argv[index + 1] == str(spec_path):
-                            pid = int(value)
-                            identity = process_identity(pid)
-                            if identity:
-                                return {"pid": pid, "identity": identity}
-                except (ValueError, IndexError):
+                    if command.endswith(wrapper_suffix):
+                        pid = int(value)
+                        identity = process_identity(pid)
+                        if identity:
+                            return {"pid": pid, "identity": identity}
+                except ValueError:
                     continue
         except (OSError, subprocess.TimeoutExpired):
             pass

@@ -25,7 +25,13 @@ from .worker import process_identity, process_matches
 def public_jobs(jobs):
     fields = ("id", "task_id", "runtime", "stage", "attempt", "pid", "revision", "reviewed_revision",
               "review_result", "tests_passed", "blocker", "updated_at")
-    return [{key: job[key] for key in fields} for job in jobs]
+    values = [{key: job[key] for key in fields} for job in jobs]
+    for value, job in zip(values, jobs):
+        value["decision_id"] = job.get("payload", {}).get("decision_id", "")
+        value["next_action"] = ("answer_product_decision" if value["decision_id"] and value["stage"] == "blocked"
+                                else "await_runtime_recovery" if value["blocker"]
+                                else "await_task" if value["stage"] == "integrated" else value["stage"])
+    return values
 
 
 def status(config):
@@ -47,7 +53,7 @@ def status(config):
     return value
 
 
-def enqueue(config, task_id, requirements, runtime=None, acceptance=""):
+def enqueue(config, task_id, requirements, runtime=None, acceptance="", allowed_paths=None):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", task_id):
         raise ValueError("invalid_task_id")
     store = Store(config["state_dir"])
@@ -73,6 +79,8 @@ def enqueue(config, task_id, requirements, runtime=None, acceptance=""):
         return store.enqueue(task_id, worktree, branch, runtime or config["runtime"],
                              payload={"requirements": requirements, "acceptance": acceptance,
                                       "base_revision": base,
+                                      "allowed_paths": allowed_paths or [],
+                                      "question_path": str(Path(config["state_dir"]) / "questions" / (task_id + ".json")),
                                       "findings_path": str(Path(config["state_dir"]) / "findings" / (task_id + ".json"))})
 
 
@@ -83,6 +91,7 @@ def run(config_path):
         signal.signal(signum, lambda *_: supervisor.stop())
     package_root = Path(__file__).resolve().parent.parent
     scan_process = None
+    scan_next_run = 0
     tracker_next_run = 0
     tracker_status = {"status": "not_checked"}
     try:
@@ -109,12 +118,18 @@ def run(config_path):
             maintenance_dir = Path(config["state_dir"]) / "maintenance"
             report = maintenance_dir / "maintenance.json"
             due = not report.exists() or time.time() - report.stat().st_mtime > config.get("maintenance_interval_seconds", 86400)
+            if report.exists() and not due:
+                try:
+                    due = json.loads(report.read_text()).get("revision") != git(config["repo"], "rev-parse", "HEAD")
+                except (OSError, ValueError):
+                    due = True
             # A separate scanner lock also covers a surviving scan after restart.
-            if due and (scan_process is None or scan_process.poll() is not None):
+            if due and time.time() >= scan_next_run and (scan_process is None or scan_process.poll() is not None):
                 scan_process = subprocess.Popen([sys.executable, "-m", "factory", "--config", str(config_path), "maintenance"],
                                                 cwd=package_root, stdin=subprocess.DEVNULL,
                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                                 start_new_session=True)
+                scan_next_run = time.time() + 60
             supervisor._stop.wait(config.get("poll_seconds", 3))
     finally:
         supervisor.close()

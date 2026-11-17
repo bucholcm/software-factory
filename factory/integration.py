@@ -49,8 +49,10 @@ def integrate_ready(supervisor, config):
                 command(["git", "rebase", "--abort"], cwd=job["worktree"])
                 supervisor.store.update(job["id"], stage="blocked", resume_stage="implementing", blocker="rebase_conflict")
             else:
+                payload = dict(job["payload"], base_revision=base)
                 supervisor.store.update(job["id"], stage="testing", revision=git(job["worktree"], "rev-parse", "HEAD"),
-                                        reviewed_revision="", review_result="", tests_passed=False, attempt=0, blocker="")
+                                        reviewed_revision="", review_result="", tests_passed=False, attempt=0, blocker="",
+                                        payload=payload)
             continue
         checkpoint = code_checkpoint(repo, Path(config["state_dir"]) / "backups", config["base_branch"])
         journal = {"job_id": job["id"], "base_revision": base, "revision": job["revision"],

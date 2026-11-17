@@ -17,10 +17,11 @@ SCHEMA = {
     "properties": {
         "status": {"type": "string", "enum": ["completed", "blocked", "failed"]},
         "review_result": {"type": "string", "enum": ["approved", "changes_requested", "not_applicable"]},
+        "question": {"type": "string"},
         "findings": {"type": "array", "items": {"type": "object", "additionalProperties": False,
             "properties": {"file": {"type": "string"}, "line": {"type": "integer"},
                            "detail": {"type": "string"}}, "required": ["file", "line", "detail"]}},
-    }, "required": ["status", "review_result", "findings"],
+    }, "required": ["status", "review_result", "findings", "question"],
 }
 
 
@@ -40,14 +41,16 @@ def safe_changed_paths(repo):
     return sorted(set(paths))
 
 
+def documentation_path(name):
+    path = Path(name)
+    return (not path.is_absolute() and ".." not in path.parts and name.endswith(".md")
+            and path.name not in {"AGENTS.md", "CLAUDE.md", "SKILL.md"}
+            and not any(part in {".agents", ".codex", ".opencode", ".github", "skills"} for part in path.parts))
+
+
 def is_documentation_change(repo, base):
     files = git(repo, "diff", "--name-only", base, "HEAD").splitlines()
-    def allowed(name):
-        path = Path(name)
-        return (name.endswith(".md") and path.name not in {"AGENTS.md", "CLAUDE.md", "SKILL.md"}
-                and not any(part in {".agents", ".codex", ".opencode", ".github", "skills"}
-                            for part in path.parts))
-    return bool(files) and all(allowed(name) for name in files)
+    return bool(files) and all(documentation_path(name) for name in files)
 
 
 def runtime_environment():
@@ -91,9 +94,14 @@ def _prompt(job):
         "Do not mutate Beads, commit, push, merge, launch other agents, change permissions, or start services.",
         "The supervisor owns commits, quality gates, independent review and integration.",
         "Return the requested JSON only. Do not place private data or credentials in output.",
+        "Use status blocked only for a genuine human product decision. Include the concrete question,",
+        "recommendation and alternatives in question. For completed results question must be an empty string.",
+        "Repair technical failures yourself within scope or return failed; do not turn them into product questions.",
         "Task: " + job["task_id"], "Requirements: " + job["payload"].get("requirements", ""),
         "Acceptance: " + job["payload"].get("acceptance", ""),
     ]
+    if job["payload"].get("allowed_paths"):
+        lines += ["You may change only these files: " + ", ".join(job["payload"]["allowed_paths"])]
     if review:
         lines += ["Read-only review of exact SHA " + job["revision"],
                   "Compare against " + job["payload"]["base_revision"] + ". Check requirements, diff, regressions and privacy.",
@@ -155,7 +163,14 @@ def _agent(job, config, result_path):
     if not isinstance(response, dict) or response.get("status") not in {"completed", "blocked", "failed"}:
         raise RuntimeError("invalid_agent_result")
     if response["status"] != "completed":
-        write_json(result_path, {"status": response["status"], "blocker": "product_decision_required"})
+        if response["status"] == "blocked":
+            question = response.get("question", "")
+            if (not isinstance(question, str) or not 10 <= len(question) <= 2000
+                    or re.search(r"(?i)(api[_ -]?key|secret|password|bearer|token)\s*[:=]", question)):
+                raise RuntimeError("invalid_product_question")
+            write_json(Path(job["payload"]["question_path"]), {"question": question})
+        write_json(result_path, {"status": response["status"], "blocker": "product_decision_required"
+                                if response["status"] == "blocked" else "agent_execution_failed"})
         return
     if review:
         if git(job["worktree"], "status", "--porcelain"):
@@ -180,6 +195,9 @@ def _agent(job, config, result_path):
                                 "reviewed_revision": job["revision"], "review_result": verdict})
     else:
         paths = safe_changed_paths(job["worktree"])
+        allowed = job["payload"].get("allowed_paths")
+        if allowed and any(path not in allowed for path in paths):
+            raise RuntimeError("task_scope_exceeded")
         if paths:
             git(job["worktree"], "add", "--", *paths)
             git(job["worktree"], "-c", "user.name=Software Factory", "-c", "user.email=factory@local.invalid",

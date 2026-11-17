@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from factory.store import Store
 from factory.supervisor import Supervisor
@@ -39,7 +40,7 @@ class SupervisorTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.state = self.root / "state"
+        self.state = self.root / "Application Support" / "factory state"
         self.config = {"repo": str(self.root), "state_dir": str(self.state), "poll_seconds": 0.05,
                        "startup_grace_seconds": 0.2, "retry_base_seconds": 0.05,
                        "job_timeout_seconds": 10}
@@ -116,6 +117,51 @@ class SupervisorTests(unittest.TestCase):
         replacement = self.supervisor(builder)
         finished = self.wait(replacement, job["id"], "ready")
         self.assertEqual(REVISION, finished["reviewed_revision"])
+        self.assertEqual(3, len(counter.read_text().splitlines()))
+
+    def test_launch_discovery_matches_full_unquoted_spaced_spec_path(self):
+        spec = self.state / "jobs" / "synthetic" / "spec.json"
+        command = f"/path with spaces/python -m factory.worker --spec {spec}"
+        output = "\n".join([
+            f"100 {command}-other",
+            f"101 {command} extra-argument",
+            f"102 {command}",
+        ])
+        result = subprocess.CompletedProcess([], 0, stdout=output)
+        with patch("factory.supervisor.subprocess.run", return_value=result), patch(
+            "factory.supervisor.process_identity", return_value="identity"
+        ) as identify:
+            self.assertEqual({"pid": 102, "identity": "identity"}, Supervisor._find_launch(spec))
+        identify.assert_called_once_with(102)
+
+    def test_restart_adopts_spaced_launch_without_pid_or_identity_receipt(self):
+        counter = self.root / "count"
+        builder = lambda job, path: command_for(result_for(job), path, delay=1, counter=counter)
+        first = self.supervisor(builder)
+        job = self.enqueue(first)
+        first.tick()
+        launched = first.store.get(job["id"])
+        identity_path = Path(launched["attempt_dir"]) / "identity.json"
+        end = time.monotonic() + 5
+        while not identity_path.exists() and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertTrue(identity_path.exists())
+        identity = json.loads(identity_path.read_text())
+        # Reproduce the durable state immediately after Popen but before either
+        # the parent PID update or the wrapper identity receipt is persisted.
+        identity_path.unlink()
+        first.store.update(job["id"], pid=None, process_identity="")
+        first.close()
+        replacement = self.supervisor(builder)
+        replacement.tick()
+        adopted = replacement.store.get(job["id"])
+        self.assertEqual(identity["pid"], adopted["pid"])
+        self.assertEqual(identity["identity"], adopted["process_identity"])
+        self.assertEqual(1, adopted["attempt"])
+        # The original wrapper's delayed receipt becomes durable after adoption.
+        atomic_json(identity_path, identity)
+        ready = self.wait(replacement, job["id"], "ready")
+        self.assertEqual(REVISION, ready["reviewed_revision"])
         self.assertEqual(3, len(counter.read_text().splitlines()))
 
     def test_actual_supervisor_process_kill_and_restart(self):

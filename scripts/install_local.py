@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--name", default="buchos")
     parser.add_argument("--install-scanners", action="store_true")
     parser.add_argument("--start", action="store_true")
+    parser.add_argument("--non-implementation-issue", action="append", default=[])
     args = parser.parse_args()
     os.umask(0o077)
     if not re.fullmatch(r"[a-z][a-z0-9-]{0,40}", args.name):
@@ -61,6 +62,7 @@ def main():
     config_path = state / "config.json"
     run([python, "-m", "factory", "--config", str(config_path), "init", "--repo", str(repo), "--state-dir", str(state)], cwd=destination)
     config = json.loads(config_path.read_text())
+    config["non_implementation_issue_ids"] = args.non_implementation_issue
     app_python = repo / ".venv/bin/python"
     config["maintenance_python_environment"] = str(app_python) if app_python.is_file() else None
     if args.install_scanners:

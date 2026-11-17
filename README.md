@@ -21,6 +21,11 @@ silently approved by this pilot. This limit is explicit in status/configuration.
 
 Task intake reads Beads and checks GitHub reviews before claiming open,
 unassigned tasks labeled `factory-pilot` and `ready-for-development`. It preserves
+explicit file scopes recorded as `factory_paths` in Beads metadata; only ordinary
+documentation paths are eligible in this rollout. Disjoint scoped work can
+continue while a decision blocks another task. Product questions become separate
+decision Beads with native blocking edges; a substantive answer in the decision's
+close reason resumes only its dependent job. It preserves
 other agents' work and enforces the global task limit conservatively. The initial
 pilot processes one job at a time. Finished work is verified on local `main` before
 closing its Bead. It does not push to GitHub in this first rollout.

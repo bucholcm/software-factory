@@ -160,6 +160,31 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(json.loads(manifest.read_text()), original_manifest)
         self.assertEqual(json.loads(journal_path.read_text())["base_revision"], self.base)
 
+    def test_rebase_rechecks_documentation_against_current_main(self):
+        state = self.root / "factory-state"
+        store = Store(state)
+        worktree = self.root / "worktree"
+        run(self.repo, "worktree", "add", "-b", "factory/rebase", str(worktree), "main")
+        (worktree / "docs").mkdir()
+        (worktree / "docs/pilot.md").write_text("pilot\n")
+        run(worktree, "add", "docs/pilot.md")
+        run(worktree, "commit", "-m", "documentation")
+        revision = git(worktree, "rev-parse", "HEAD")
+        self.commit_file("app.py", "print('upstream')\n")
+        current_main = git(self.repo, "rev-parse", "HEAD")
+        job = store.enqueue("test-rebase", worktree, "factory/rebase", payload={"base_revision": self.base})
+        store.update(job["id"], stage="ready", revision=revision, reviewed_revision=revision,
+                     review_result="approved", tests_passed=True)
+        supervisor = type("Stub", (), {"store": store})()
+        config = {"repo": str(self.repo), "state_dir": str(state), "base_branch": "main",
+                  "auto_merge": True, "integration_policy": "documentation_only"}
+        integrate_ready(supervisor, config)
+        rebased = store.get(job["id"])
+        self.assertEqual(rebased["stage"], "testing")
+        self.assertEqual(rebased["payload"]["base_revision"], current_main)
+        self.assertEqual(rebased["reviewed_revision"], "")
+        self.assertTrue(is_documentation_change(worktree, current_main))
+
 
 if __name__ == "__main__":
     unittest.main()
