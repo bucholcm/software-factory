@@ -27,6 +27,9 @@ class FakeRunner:
         if isinstance(value, Exception):
             raise value
         code, payload = value
+        if argv[0] == "gitleaks":
+            Path(argv[argv.index("--report-path") + 1]).write_text(json.dumps(payload))
+            return subprocess.CompletedProcess(argv, code, "PRIVATE untrusted stdout", "PRIVATE STDERR TOKEN")
         return subprocess.CompletedProcess(argv, code, json.dumps(payload), "PRIVATE STDERR TOKEN")
 
     @staticmethod
@@ -87,7 +90,7 @@ class MaintenanceTest(unittest.TestCase):
         self.assertEqual(len(self.category(report, "npm_outdated")), 2)
         self.assertTrue(all(check["status"] == "findings" for check in self.category(report, "npm_outdated")))
         self.assertNotIn("PRIVATE", json.dumps(report))
-        self.assertTrue(all("--ignore-scripts" in call and "--package-lock-only" in call for call in runner.calls))
+        self.assertTrue(all("--ignore-scripts" in call and "--package-lock-only" in call for call in runner.calls if call[0] == "npm"))
 
     def test_npm_advisory_url_is_reduced_to_stable_id(self):
         self.commit({"package.json": "{}", "package-lock.json": "{}"})
@@ -133,10 +136,10 @@ class MaintenanceTest(unittest.TestCase):
                 self.assertNotIn("PRIVATE", json.dumps(report))
 
     def test_failed_rescan_replaces_prior_clean_report(self):
-        self.commit({"main.py": "pass\n"})
-        clean = scan(self.repo, self.output, runner=FakeRunner({("bandit", ""): (0, {"results": []})}))
+        self.commit({"package.json": "{}", "package-lock.json": "{}"})
+        clean = scan(self.repo, self.output, runner=FakeRunner({("npm", "audit"): (0, {"vulnerabilities": {}}), ("npm", "outdated"): (0, {}), ("gitleaks", ""): (0, [])}))
         self.assertEqual(clean["status"], "clean")
-        scan(self.repo, self.output, runner=FakeRunner({("bandit", ""): (2, {})}))
+        scan(self.repo, self.output, runner=FakeRunner({("npm", "audit"): (2, {})}))
         self.assertEqual(load_report(self.output)["status"], "error")
 
     def test_age_or_revision_mismatch_marks_report_stale(self):
@@ -153,7 +156,7 @@ class MaintenanceTest(unittest.TestCase):
         runner = FakeRunner()
         report = scan(self.repo, self.output, runner=runner)
         self.assertEqual(report["status"], "unavailable")
-        self.assertFalse(runner.calls)
+        self.assertFalse([call for call in runner.calls if call[0] == "pip-audit"])
         self.assertNotIn("PRIVATE", json.dumps(report))
 
     def test_declared_pinned_dependencies_are_audited_and_unpinned_are_visible(self):
@@ -164,7 +167,7 @@ class MaintenanceTest(unittest.TestCase):
         runner = FakeRunner()
         report = scan(self.repo, self.output, runner=runner)
         self.assertEqual(report["status"], "unavailable")
-        self.assertFalse(runner.calls)
+        self.assertFalse([call for call in runner.calls if call[0] == "pip-audit"])
 
     def test_inventory_failure_overwrites_prior_report_without_error_text(self):
         self.commit({"README.md": "synthetic"})
@@ -181,7 +184,8 @@ class MaintenanceTest(unittest.TestCase):
         runner = FakeRunner({("pip-audit", ""): (0, {"dependencies": [{"name": "example", "vulns": []}]})})
         report = scan(self.repo, self.output, runner=runner)
         self.assertEqual(self.category(report, "python_resolved")[0]["status"], "clean")
-        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(len([call for call in runner.calls if call[0] == "pip-audit"]), 1)
+        self.assertEqual(self.category(report, "python_transitive")[0]["status"], "clean")
 
     def test_skipped_dependency_or_empty_trivy_payload_is_never_clean(self):
         self.commit({"requirements.txt": "example==1.0\n", "Dockerfile": "FROM scratch\n"})
@@ -189,7 +193,48 @@ class MaintenanceTest(unittest.TestCase):
                              ("trivy", "config"): (0, {})})
         report = scan(self.repo, self.output, runner=runner)
         self.assertEqual(report["status"], "error")
-        self.assertTrue(all(check["status"] == "error" for check in report["checks"] if check["tool"] in {"pip-audit", "trivy"}))
+        self.assertTrue(all(check["status"] == "error" for check in report["checks"] if check["category"] in {"python_resolved", "docker_configuration"}))
+
+    def test_direct_dependency_audit_does_not_claim_transitive_coverage(self):
+        self.commit({"pyproject.toml": '[project]\nname="synthetic"\nversion="1"\ndependencies=["example==1.0"]\n'})
+        runner = FakeRunner({("pip-audit", ""): (0, {"dependencies": [{"name": "example", "vulns": []}]}),
+                             ("gitleaks", ""): (0, [])})
+        report = scan(self.repo, self.output, runner=runner)
+        self.assertEqual(self.category(report, "python_declared")[0]["status"], "clean")
+        self.assertEqual(self.category(report, "python_transitive")[0]["status"], "unavailable")
+        self.assertEqual(self.category(report, "python_transitive")[0]["error_code"], "complete_dependency_inventory_required")
+        self.assertEqual(self.category(report, "python_versions")[0]["status"], "unavailable")
+        self.assertEqual(report["status"], "unavailable")
+
+    def test_docker_updates_remain_explicitly_incomplete_despite_clean_trivy(self):
+        self.commit({"Dockerfile": "FROM scratch\n"})
+        runner = FakeRunner({("trivy", "config"): (0, {"Results": []}), ("gitleaks", ""): (0, [])})
+        report = scan(self.repo, self.output, runner=runner)
+        self.assertEqual(self.category(report, "docker_updates")[0]["status"], "unavailable")
+        self.assertEqual(report["status"], "unavailable")
+
+    def test_secret_scan_reports_only_redacted_rule_identifiers_and_deletes_temp_report(self):
+        self.commit({"main.py": "pass\n"})
+        runner = FakeRunner({("gitleaks", ""): (1, [{"RuleID": "generic-api-key", "Secret": "REDACTED", "Match": "PRIVATE source", "File": "PRIVATE path"}])})
+        report = scan(self.repo, self.output, runner=runner)
+        check = self.category(report, "secret_scan")[0]
+        self.assertEqual(check["status"], "findings")
+        self.assertEqual(check["findings"], [{"id": "GITLEAKS-generic-api-key"}])
+        call = next(call for call in runner.calls if call[0] == "gitleaks")
+        self.assertIn("--redact=100", call)
+        self.assertIn("--no-git", call)
+        self.assertFalse(Path(call[call.index("--report-path") + 1]).exists())
+        self.assertNotIn("PRIVATE", json.dumps(report))
+        self.assertNotIn("PRIVATE", (self.output / "maintenance.json").read_text())
+
+    def test_secret_scanner_missing_or_unredacted_results_never_produce_clean(self):
+        self.commit({"main.py": "pass\n"})
+        report = scan(self.repo, self.output, runner=FakeRunner())
+        self.assertEqual(self.category(report, "secret_scan")[0]["status"], "unavailable")
+        runner = FakeRunner({("gitleaks", ""): (1, [{"RuleID": "generic-api-key", "Secret": "PRIVATE"}])})
+        report = scan(self.repo, self.output, runner=runner)
+        self.assertEqual(self.category(report, "secret_scan")[0]["status"], "error")
+        self.assertNotIn("PRIVATE", json.dumps(report))
 
 
 if __name__ == "__main__":

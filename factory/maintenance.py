@@ -19,9 +19,9 @@ from typing import Callable, Mapping, Sequence
 TIMEOUT = 120
 REPORT_FILE = "maintenance.json"
 _PACKAGE = re.compile(r"(?:@[a-z0-9._-]+/)?[a-z0-9][a-z0-9._+-]{0,127}", re.I)
-_IDENTIFIER = re.compile(r"(?:CVE-\d{4}-\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|PYSEC-\d{4}-\d+|NPM-\d+|B\d{3}|AVD-[A-Z0-9-]+)", re.I)
+_IDENTIFIER = re.compile(r"(?:CVE-\d{4}-\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|PYSEC-\d{4}-\d+|NPM-\d+|B\d{3}|AVD-[A-Z0-9-]+|GITLEAKS-[a-z0-9_-]{1,64})", re.I)
 _SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-_TOOLS = {"python": ("pip-audit",), "npm": ("npm",), "container": ("trivy",), "code": ("bandit",)}
+_TOOLS = {"python": ("pip-audit",), "npm": ("npm",), "container": ("trivy",), "code": ("bandit",), "secrets": ("gitleaks",)}
 _STATUSES = {"clean", "findings", "unavailable", "not_applicable", "error"}
 
 
@@ -160,6 +160,45 @@ def _scanner(category, tool, argv, cwd, runner, parser):
     return _check(category, tool, "findings" if findings else "clean", findings)
 
 
+def _secret_scanner(snapshot, runner, command):
+    # Gitleaks writes only its fully redacted report to a private temporary file.
+    # stdout/stderr are captured in memory and are never forwarded or logged.
+    with tempfile.TemporaryDirectory(prefix="factory-redacted-") as temporary:
+        destination = Path(temporary) / "gitleaks.json"
+        destination.touch(mode=0o600)
+        argv = [*command, "detect", "--source", str(snapshot), "--no-git",
+                "--redact=100", "--report-format=json", "--report-path", str(destination),
+                "--exit-code", "1", "--no-banner"]
+        try:
+            result = _run(runner, argv, snapshot)
+        except FileNotFoundError:
+            return _check("secret_scan", "gitleaks", "unavailable", error_code="tool_missing")
+        except subprocess.TimeoutExpired:
+            return _check("secret_scan", "gitleaks", "error", error_code="scan_timeout")
+        except OSError:
+            return _check("secret_scan", "gitleaks", "error", error_code="scan_failed")
+        if result.returncode not in (0, 1):
+            return _check("secret_scan", "gitleaks", "error", error_code="scan_failed")
+        try:
+            payload = json.loads(destination.read_text())
+            if not isinstance(payload, list):
+                raise ValueError
+            findings = []
+            for item in payload:
+                # The scanner must honor --redact before its report is accepted.
+                if item.get("Secret") != "REDACTED":
+                    raise ValueError
+                finding = _finding(identifier=f"GITLEAKS-{item['RuleID']}")
+                if not finding:
+                    raise ValueError
+                findings.append(finding)
+            if result.returncode and not findings:
+                raise ValueError
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return _check("secret_scan", "gitleaks", "error", error_code="invalid_scan_result")
+        return _check("secret_scan", "gitleaks", "findings" if findings else "clean", findings)
+
+
 def _is_docker(name):
     path = PurePosixPath(name)
     return (path.name == "Dockerfile" or path.name.startswith("Dockerfile.")
@@ -199,6 +238,7 @@ def _snapshot(repo, target, runner):
 
 def _python_checks(snapshot, names, runner, command):
     checks = []
+    transitive_checks = []
     manifests = [name for name in names if PurePosixPath(name).name.startswith("requirements") and name.endswith(".txt")]
     if "pyproject.toml" in names:
         try:
@@ -240,6 +280,7 @@ def _python_checks(snapshot, names, runner, command):
                 manifests.append(generated.name)
             else:
                 checks.append(_check("python_resolved", "pip-audit", "not_applicable"))
+                transitive_checks.append(checks[-1])
         except (ValueError, TypeError, KeyError, AttributeError):
             checks.append(_check("python_resolved", "pip-audit", "error", error_code="invalid_manifest"))
     if not manifests and not checks:
@@ -262,6 +303,19 @@ def _python_checks(snapshot, names, runner, command):
         category = "python_declared" if name == "factory-declared-requirements.txt" else "python_resolved"
         checks.append(_scanner(category, "pip-audit", [*command, "--requirement", name, "--format", "json",
                                "--progress-spinner", "off", "--disable-pip", "--no-deps"], snapshot, runner, _parse_python))
+        if name.startswith(("factory-uv.lock-", "factory-poetry.lock-")):
+            transitive_checks.append(checks[-1])
+    applicable = any(name.endswith(".py") or PurePosixPath(name).name in {"pyproject.toml", "uv.lock", "poetry.lock"}
+                     or PurePosixPath(name).name.startswith("requirements") for name in names)
+    if transitive_checks:
+        for check in transitive_checks:
+            checks.append(_check("python_transitive", "pip-audit", check["status"], check["findings"], error_code=check.get("error_code")))
+    elif applicable:
+        checks.append(_check("python_transitive", "pip-audit", "unavailable", error_code="complete_dependency_inventory_required"))
+    else:
+        checks.append(_check("python_transitive", "pip-audit", "not_applicable"))
+    checks.append(_check("python_versions", "python", "unavailable" if applicable else "not_applicable",
+                         error_code="update_checker_not_configured" if applicable else None))
     return checks
 
 
@@ -281,6 +335,7 @@ def _execute(snapshot, names, runner, commands):
     docker = [name for name in names if _is_docker(name)]
     checks.append(_check("docker_inventory", "inventory", "clean" if docker else "not_applicable", count=len(docker)))
     if docker:
+        checks.append(_check("docker_updates", "renovate", "unavailable", error_code="update_checker_not_configured"))
         checks.append(_scanner("docker_configuration", "trivy", [*commands["container"], "config", "--format", "json", "--exit-code", "1", "."], snapshot, runner, _parse_trivy))
         images = set()
         unresolved = False
@@ -303,6 +358,7 @@ def _execute(snapshot, names, runner, commands):
         if unresolved:
             checks.append(_check("docker_image", "trivy", "unavailable", error_code="unresolved_image_reference"))
     else:
+        checks.append(_check("docker_updates", "renovate", "not_applicable"))
         checks.append(_check("docker_configuration", "trivy", "not_applicable"))
         checks.append(_check("docker_image", "trivy", "not_applicable"))
     if any(name.endswith(".py") for name in names):
@@ -311,6 +367,7 @@ def _execute(snapshot, names, runner, commands):
         checks.append(_check("code_security", "bandit", "not_applicable"))
     if any(PurePosixPath(name).suffix in _SOURCE_SUFFIXES - {".py"} for name in names):
         checks.append(_check("code_security_javascript", "bandit", "unavailable", error_code="unsupported_source_language"))
+    checks.append(_secret_scanner(snapshot, runner, commands["secrets"]))
     return checks
 
 
@@ -319,7 +376,7 @@ def scan(repo: Path, output_dir: Path, *, runner=subprocess.run,
     """Run scanners on tracked HEAD, atomically replacing the sanitized report.
 
     ``runner`` has subprocess.run's interface. ``commands`` can replace the
-    executable prefix for python/npm/container/code adapters. No shell is used.
+    executable prefix for python/npm/container/code/secrets adapters. No shell is used.
     Audit tools may contact advisory registries; this function never installs
     packages or executes project scripts. Missing/incomplete checks stay visible.
     """
