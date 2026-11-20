@@ -28,7 +28,7 @@ class Supervisor:
     False/None/exception blocks the job; agent claims alone never pass a gate.
     """
 
-    def __init__(self, config: dict, command_builder, verifier=None):
+    def __init__(self, config: dict, command_builder, verifier=None, startup_callback=None):
         self.config = dict(config)
         self.store = Store(config["state_dir"])
         self.command_builder = command_builder
@@ -47,6 +47,8 @@ class Supervisor:
             self._lock.close()
             raise RuntimeError("supervisor_already_running") from None
         try:
+            if startup_callback is not None:
+                startup_callback()
             if config.get("repo"):
                 repo = Path(config["repo"]).resolve()
                 common = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-common-dir"],

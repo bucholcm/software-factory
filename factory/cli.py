@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 from .adapters import builder, verifier
 from .config import command, git, load, write_json
@@ -39,7 +40,12 @@ def status(config):
     try:
         value = json.loads(path.read_text())
         alive = process_matches(value.get("pid"), value.get("process_identity", ""))
-        value["status"] = "running" if alive else "stopped"
+        if not alive:
+            value["status"] = "stopped"
+        elif time.time() - value.get("updated_at", 0) > config.get("heartbeat_stale_seconds", 120):
+            value["status"] = "unresponsive"
+        elif value.get("status") not in {"starting", "blocked", "stopped"}:
+            value["status"] = "running" if value.get("ready", True) else "starting"
     except (OSError, ValueError, TypeError):
         value = {"status": "stopped"}
     value["jobs"] = public_jobs(Store(config["state_dir"]).jobs())
@@ -86,7 +92,26 @@ def enqueue(config, task_id, requirements, runtime=None, acceptance="", allowed_
 
 def run(config_path):
     config = load(config_path)
-    supervisor = Supervisor(config, builder(config_path), verifier)
+    status_path = Path(config["state_dir"]) / "status.json"
+    startup = {"startup_id": uuid.uuid4().hex, "started_at": time.time(), "pid": os.getpid(),
+               "process_identity": process_identity(os.getpid()) or ""}
+    announced = False
+    def heartbeat(snapshot=None, *, ready=False, phase="initializing", state="starting", error=None):
+        value = {**(snapshot or {}), **startup, "ready": ready, "status": state,
+                 "phase": phase, "updated_at": time.time()}
+        if error:
+            value["startup_error"] = error
+        write_json(status_path, value)
+    def announce_start():
+        nonlocal announced
+        heartbeat()
+        announced = True
+    try:
+        supervisor = Supervisor(config, builder(config_path), verifier, startup_callback=announce_start)
+    except Exception:
+        if announced:
+            heartbeat(phase="startup_failed", state="blocked", error="initialization_failed")
+        raise
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: supervisor.stop())
     package_root = Path(__file__).resolve().parent.parent
@@ -94,9 +119,18 @@ def run(config_path):
     scan_next_run = 0
     tracker_next_run = 0
     tracker_status = {"status": "not_checked"}
+    has_reconciled = False
     try:
         while not supervisor._stop.is_set():
+            heartbeat({"jobs": public_jobs(supervisor.store.jobs())}, ready=has_reconciled,
+                      phase="reconciling", state="running")
             snapshot = supervisor.tick()
+            has_reconciled = True
+            snapshot["jobs"] = public_jobs(supervisor.store.jobs())
+            snapshot["tracker"] = tracker_status
+            snapshot["integration_policy"] = config["integration_policy"]
+            snapshot["auto_merge"] = config["auto_merge"]
+            heartbeat(snapshot, ready=True, phase="checking_tracker", state="running")
             if config.get("tracker_enabled") and time.time() >= tracker_next_run:
                 try:
                     from .tracker import reconcile
@@ -105,16 +139,16 @@ def run(config_path):
                     tracker_status = {"status": "tracker_or_github_unavailable"}
                 tracker_next_run = time.time() + config.get("tracker_interval_seconds", 30)
             snapshot["tracker"] = tracker_status
+            heartbeat(snapshot, ready=True, phase="integrating", state="running")
             try:
                 integrate_ready(supervisor, config)
                 snapshot["integration_error"] = ""
             except Exception:
                 snapshot["integration_error"] = "integration_requires_attention"
             snapshot["jobs"] = public_jobs(supervisor.store.jobs())
-            snapshot["process_identity"] = process_identity(os.getpid()) or ""
             snapshot["integration_policy"] = config["integration_policy"]
             snapshot["auto_merge"] = config["auto_merge"]
-            write_json(Path(config["state_dir"]) / "status.json", snapshot)
+            heartbeat(snapshot, ready=True, phase="idle", state="running")
             maintenance_dir = Path(config["state_dir"]) / "maintenance"
             report = maintenance_dir / "maintenance.json"
             due = not report.exists() or time.time() - report.stat().st_mtime > config.get("maintenance_interval_seconds", 86400)
@@ -133,6 +167,7 @@ def run(config_path):
             supervisor._stop.wait(config.get("poll_seconds", 3))
     finally:
         supervisor.close()
+        heartbeat({"jobs": public_jobs(supervisor.store.jobs())}, phase="stopped", state="stopped")
 
 
 def main():
