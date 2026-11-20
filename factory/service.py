@@ -287,6 +287,10 @@ def repair_service(source, config_path, *, expected_revision, python, name="buch
             raise RuntimeError("service_bootstrap_failed")
         ready = readiness(state, not_before=not_before, previous_startup_id=previous.get("startup_id", ""),
                           timeout=ready_timeout, process_verifier=process_verifier)
+        native = _launchctl(runner, "print", target)
+        native_pid = re.search(r"^\s*pid\s*=\s*(\d+)\s*$", native.stdout, re.M)
+        if native.returncode or native_pid is None or int(native_pid.group(1)) != ready["pid"]:
+            raise RuntimeError("service_process_mismatch")
         journal.update(status="ready", startup_id=ready["startup_id"], pid=ready["pid"])
         write_json(journal_path, journal)
         return {**result, "status": "ready", "startup_id": ready["startup_id"], "pid": ready["pid"]}

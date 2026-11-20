@@ -30,6 +30,7 @@ class FakeLaunchctl:
             stdout = '{ "dev.software-factory.buchos" => ' + str(self.disabled).lower() + ' }'
         elif action == "print":
             code = 0 if self.loaded else 3
+            stdout = "\tpid = 456\n" if self.loaded else ""
         elif action == "enable":
             self.disabled = False
         elif action == "disable":
@@ -197,6 +198,17 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result["startup_id"], "b" * 32)
         journal = json.loads(next((self.state / "service").glob("activation-*.json")).read_text())
         self.assertEqual(journal["status"], "ready")
+
+    def test_another_fresh_supervisor_cannot_satisfy_native_service_readiness(self):
+        old = self.old_definition()
+        runner = FakeLaunchctl()
+        with self.assertRaisesRegex(RuntimeError, "service_process_mismatch"):
+            self.repair(activate=True, runner=runner,
+                        readiness=lambda *args, **kwargs: {"pid": 987, "startup_id": "b" * 32},
+                        process_verifier=lambda *_: False)
+        self.assertEqual(self.plist.read_bytes(), old)
+        self.assertFalse(runner.loaded)
+        self.assertTrue(runner.disabled)
 
     def test_readiness_rejects_stale_reused_startup_and_unready_heartbeats(self):
         now = time.time()
