@@ -30,6 +30,11 @@ class FakeRunner:
         if argv[0] == "gitleaks":
             Path(argv[argv.index("--report-path") + 1]).write_text(json.dumps(payload))
             return subprocess.CompletedProcess(argv, code, "PRIVATE untrusted stdout", "PRIVATE STDERR TOKEN")
+        if argv[0] == "bandit" and "--output" in argv:
+            target = Path(argv[argv.index("--output") + 1])
+            assert target.stat().st_mode & 0o777 == 0o600
+            target.write_text(json.dumps(payload))
+            return subprocess.CompletedProcess(argv, code, "PRIVATE non-JSON plugin diagnostic", "PRIVATE STDERR TOKEN")
         return subprocess.CompletedProcess(argv, code, json.dumps(payload), "PRIVATE STDERR TOKEN")
 
     @staticmethod
@@ -127,13 +132,55 @@ class MaintenanceTest(unittest.TestCase):
         self.commit({"main.py": "pass\n"})
         for value, code in [((2, {"results": [], "errors": []}), "scan_failed"),
                             ((1, {"results": [], "errors": []}), "invalid_scan_result"),
-                            ((0, {"results": [], "errors": ["PRIVATE"]}), "invalid_scan_result"),
+                            ((0, {"results": [], "errors": ["PRIVATE"]}), "scan_incomplete"),
+                            ((0, {"results": [], "error": "PRIVATE"}), "invalid_scan_result"),
                             (subprocess.TimeoutExpired(["bandit"], 1, output="PRIVATE"), "scan_timeout")]:
             with self.subTest(code=code):
                 report = scan(self.repo, self.output, runner=FakeRunner({("bandit", ""): value}))
                 self.assertEqual(report["status"], "error")
                 self.assertEqual(self.category(report, "code_security")[0]["error_code"], code)
                 self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_bandit_uses_private_report_despite_non_json_stdout_and_removes_it(self):
+        self.commit({"main.py": "pass\n"})
+        runner = FakeRunner({("bandit", ""): (1, {"results": [{"test_id": "B101", "code": "PRIVATE SOURCE", "filename": "/PRIVATE/path"}], "errors": []})})
+        report = scan(self.repo, self.output, runner=runner)
+        check = self.category(report, "code_security")[0]
+        self.assertEqual(check["status"], "findings")
+        self.assertEqual(check["findings"], [{"id": "B101"}])
+        call = next(call for call in runner.calls if call[0] == "bandit")
+        self.assertIn("--ignore-nosec", call)
+        self.assertIn("--output", call)
+        self.assertFalse(Path(call[call.index("--output") + 1]).exists())
+        self.assertNotIn("PRIVATE", json.dumps(report))
+        self.assertNotIn("PRIVATE", (self.output / "maintenance.json").read_text())
+
+    def test_bandit_partial_scan_preserves_rule_ids_without_claiming_complete(self):
+        self.commit({"main.py": "pass\n"})
+        runner = FakeRunner({("bandit", ""): (1, {"results": [{"test_id": "B603", "code": "PRIVATE SOURCE"}],
+                                                   "errors": [{"filename": "/PRIVATE/path", "reason": "PRIVATE syntax detail"}]})})
+        report = scan(self.repo, self.output, runner=runner)
+        check = self.category(report, "code_security")[0]
+        self.assertEqual(check["status"], "error")
+        self.assertEqual(check["error_code"], "scan_incomplete")
+        self.assertEqual(check["findings"], [{"id": "B603"}])
+        self.assertEqual(check["count"], 1)
+        self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_bandit_malformed_report_cannot_use_stdout_as_fallback(self):
+        self.commit({"main.py": "pass\n"})
+        class MalformedReportRunner(FakeRunner):
+            def __call__(self, argv, **kwargs):
+                if argv[0] == "bandit":
+                    if "--output" in argv:
+                        Path(argv[argv.index("--output") + 1]).write_text("PRIVATE invalid report")
+                    return subprocess.CompletedProcess(argv, 0, json.dumps({"results": [], "errors": []}), "PRIVATE")
+                return super().__call__(argv, **kwargs)
+        report = scan(self.repo, self.output, runner=MalformedReportRunner())
+        check = self.category(report, "code_security")[0]
+        self.assertEqual(check["status"], "error")
+        self.assertEqual(check["error_code"], "invalid_scan_result")
+        self.assertNotIn("PRIVATE", json.dumps(report))
 
     def test_failed_rescan_replaces_prior_clean_report(self):
         self.commit({"package.json": "{}", "package-lock.json": "{}"})

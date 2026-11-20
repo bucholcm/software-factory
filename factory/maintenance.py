@@ -233,6 +233,46 @@ def _scanner(category, tool, argv, cwd, runner, parser):
     return _check(category, tool, "findings" if findings else "clean", findings)
 
 
+def _bandit_scanner(snapshot, runner, command):
+    # Bandit plugins can write diagnostics before the JSON on stdout. A
+    # dedicated private report keeps those diagnostics out of the parser and
+    # prevents source excerpts from being retained in operational records.
+    with tempfile.TemporaryDirectory(prefix="factory-bandit-") as temporary:
+        destination = Path(temporary) / "bandit.json"
+        destination.touch(mode=0o600)
+        argv = [*command, "-r", ".", "-f", "json", "--ignore-nosec", "--output", str(destination)]
+        try:
+            result = _run(runner, argv, snapshot)
+        except FileNotFoundError:
+            return _check("code_security", "bandit", "unavailable", error_code="tool_missing")
+        except subprocess.TimeoutExpired:
+            return _check("code_security", "bandit", "error", error_code="scan_timeout")
+        except OSError:
+            return _check("code_security", "bandit", "error", error_code="scan_failed")
+        try:
+            if destination.stat().st_size > 16 * 1024 * 1024:
+                raise ValueError
+            payload = json.loads(destination.read_text())
+            if not isinstance(payload, dict) or "error" in payload:
+                raise ValueError
+            errors = payload.get("errors", [])
+            if not isinstance(errors, list):
+                raise ValueError
+            findings = _parse_bandit({**payload, "errors": []})
+        except (OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError):
+            code = "scan_failed" if result.returncode not in (0, 1) else "invalid_scan_result"
+            return _check("code_security", "bandit", "error", error_code=code)
+        if result.returncode not in (0, 1):
+            return _check("code_security", "bandit", "error", findings, error_code="scan_failed")
+        if errors:
+            # Valid findings remain useful, but skipped/invalid source files
+            # mean this is incomplete coverage, even when findings are empty.
+            return _check("code_security", "bandit", "error", findings, error_code="scan_incomplete")
+        if result.returncode and not findings:
+            return _check("code_security", "bandit", "error", error_code="invalid_scan_result")
+        return _check("code_security", "bandit", "findings" if findings else "clean", findings)
+
+
 def _secret_scanner(snapshot, runner, command):
     # Gitleaks writes only its fully redacted report to a private temporary file.
     # stdout/stderr are captured in memory and are never forwarded or logged.
@@ -438,7 +478,7 @@ def _execute(snapshot, names, runner, commands, environment_python=None):
         checks.append(_check("docker_configuration", "trivy", "not_applicable"))
         checks.append(_check("docker_image", "trivy", "not_applicable"))
     if any(name.endswith(".py") for name in names):
-        checks.append(_scanner("code_security", "bandit", [*commands["code"], "-r", ".", "-f", "json", "--ignore-nosec"], snapshot, runner, _parse_bandit))
+        checks.append(_bandit_scanner(snapshot, runner, commands["code"]))
     else:
         checks.append(_check("code_security", "bandit", "not_applicable"))
     if any(PurePosixPath(name).suffix in _SOURCE_SUFFIXES - {".py"} for name in names):
