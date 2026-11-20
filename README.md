@@ -45,9 +45,16 @@ python -m factory --config /private/path/config.json status --watch
 
 `scripts/install_local.py` installs a reviewed `main` revision to a separate
 durable directory, optional isolated scanner tools, and a per-user macOS
-LaunchAgent. `--start` activates it. Existing installations are never overwritten.
-The installed service starts at login and restarts after failure while the Mac is
-awake. It does not run while the machine is asleep or powered off.
+LaunchAgent. Without `--start` it prepares a candidate service definition;
+`--start` explicitly activates it and requires a fresh, live, ready heartbeat.
+Existing installations are never overwritten by this installer.
+
+The service runs committed code from a versioned, hash-verified artifact under
+the private state directory's `runtimes/REVISION`, with that artifact as its
+working directory and Python module path. It does not import the product from
+Documents. This avoids the observed pre-Python working-directory stall; it does
+not grant the service access to a protected project directory. Repository/tracker
+health must still be checked after activation. No macOS privacy settings change.
 
 ```sh
 python scripts/install_local.py --destination /path/to/software-factory \
@@ -59,6 +66,28 @@ launchctl bootout gui/$(id -u)/dev.software-factory.buchos
 The last command stops the supervisor; already-running bounded workers finish
 and keep their completion receipts for the next start. To restart, bootstrap the
 generated `~/Library/LaunchAgents/dev.software-factory.buchos.plist`.
+
+For an existing installation, prepare a reviewed service repair first:
+
+```sh
+python scripts/repair_local_service.py --source /path/to/reviewed/software-factory \
+  --config /private/path/factory-state/config.json --expected-revision REVIEWED_SHA
+```
+
+The result names the private runtime artifact and candidate plist. Stop the
+existing supervisor and its Herdr restart loop before repeating the command with
+`--activate`; a live verified supervisor prevents activation. The repair preserves
+configuration, execution records, tools and backups. If activation fails, it
+restores only this exact owned service's previous plist and recorded enabled/
+loaded state. The local activation journal records whether rollback completed.
+
+Readiness requires a new startup identity, fresh timestamps, a ready heartbeat
+and matching live PID identity; a stale status file or merely running launchctl
+process is insufficient. The LaunchAgent is configured to run at login and restart
+after failure while the Mac is awake. A successful current activation does not
+verify fresh-login behavior: that remains a separate manual E2E check. It does not
+run while the machine is asleep or powered off. Herdr remains the fallback host
+until native service readiness and project access are observed.
 
 ## Recovery
 

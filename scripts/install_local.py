@@ -9,12 +9,16 @@ import argparse
 import json
 import os
 from pathlib import Path
-import plistlib
 import re
 import shutil
 import subprocess
 import sys
-import time
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from factory.config import git, write_json
+from factory.service import repair_service
 
 
 def run(argv, cwd=None):
@@ -69,26 +73,10 @@ def main():
         config["maintenance_commands"] = {"python": [str(tools / "bin/python"), "-m", "pip_audit"],
                                            "code": [str(tools / "bin/python"), "-m", "bandit"],
                                            "javascript_code": [str(tools / "bin/semgrep")]}
-    config_path.write_text(json.dumps(config, indent=2, sort_keys=True))
-    arguments = [python, "-m", "factory", "--config", str(config_path), "run"]
-    service = {"Label": label, "ProgramArguments": arguments, "WorkingDirectory": str(destination),
-               "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 10,
-               "StandardOutPath": str(state / "service.out.log"),
-               "StandardErrorPath": str(state / "service.err.log"),
-               "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + str(Path.home() / ".local/bin"),
-                                        "HOME": str(Path.home()), "PYTHONUNBUFFERED": "1"}}
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    with plist_path.open("xb") as stream:
-        plistlib.dump(service, stream)
-    if args.start:
-        run(["launchctl", "bootstrap", "gui/" + str(os.getuid()), str(plist_path)])
-        deadline = time.time() + 15
-        while time.time() < deadline and not (state / "status.json").exists():
-            time.sleep(0.25)
-        if not (state / "status.json").exists():
-            raise RuntimeError("service_start_not_observed")
-    print(json.dumps({"status": "started" if args.start else "installed", "service": label,
-                      "product": str(destination), "config": str(config_path), "state": str(state)}))
+    write_json(config_path, config)
+    result = repair_service(destination, config_path, expected_revision=git(destination, "rev-parse", "HEAD"),
+                            python=python, name=args.name, activate=args.start)
+    print(json.dumps({**result, "product": str(destination), "config": str(config_path), "state": str(state)}))
 
 
 if __name__ == "__main__":
