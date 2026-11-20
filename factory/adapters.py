@@ -8,8 +8,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 from .config import command, git, load, write_json
+from .scope import verify_paths
+from .security import policy as security_policy, receipt_path
 
 
 SCHEMA = {
@@ -31,13 +34,7 @@ def safe_changed_paths(repo):
     if tracked.returncode or new.returncode:
         raise RuntimeError("change_inventory_failed")
     paths = [p for p in (tracked.stdout + new.stdout).split("\0") if p]
-    for name in paths:
-        parts = Path(name).parts
-        if (Path(name).is_absolute() or ".." in parts or any(p.startswith(".env") for p in parts)
-                or any(p in {".beads", ".buchos", ".dolt", ".git", "node_modules", ".venv"} for p in parts)
-                or Path(name).suffix.lower() in {".sqlite3", ".sqlite", ".db", ".pem", ".key"}
-                or (Path(repo) / name).is_symlink()):
-            raise RuntimeError("protected_path_changed")
+    verify_paths(repo, paths)
     return sorted(set(paths))
 
 
@@ -108,7 +105,7 @@ def _prompt(job):
                   "Do not edit files. Report actionable findings with relative file, line and concise explanation.",
                   "Set review_result approved or changes_requested. Approval requires no actionable findings."]
     elif job["stage"] == "fixing":
-        if job.get("outcome", {}).get("blocker") == "quality_gate_failed":
+        if job.get("outcome", {}).get("blocker") in {"quality_gate_failed", "security_gate_failed"}:
             lines += ["The deterministic quality gate failed. Reproduce the repository quality gates on synthetic data,",
                       "fix the technical failure, and add a relevant regression test. Do not weaken checks."]
         findings = Path(job["payload"]["findings_path"])
@@ -125,6 +122,9 @@ def _agent(job, config, result_path):
     schema_path = result_path.parent / "schema.json"
     write_json(schema_path, SCHEMA)
     prompt = _prompt(job)
+    if job["stage"] == "fixing":
+        prompt += "\nReproduce these configured quality gate argv: " + json.dumps(config.get("quality_gates", []))
+        prompt += "\nReproduce these configured security gate argv: " + json.dumps(config.get("security_gates", []))
     env = runtime_environment()
     runtime = config.get("review_runtime", job["runtime"]) if review else job["runtime"]
     if runtime == "codex":
@@ -196,12 +196,14 @@ def _agent(job, config, result_path):
     else:
         paths = safe_changed_paths(job["worktree"])
         allowed = job["payload"].get("allowed_paths")
-        if allowed and any(path not in allowed for path in paths):
-            raise RuntimeError("task_scope_exceeded")
+        verify_paths(job["worktree"], paths, allowed)
         if paths:
             git(job["worktree"], "add", "--", *paths)
             git(job["worktree"], "-c", "user.name=Software Factory", "-c", "user.email=factory@local.invalid",
                 "commit", "-m", f"feat: implement {job['task_id']}")
+        committed = git(job["worktree"], "diff", "--name-only", "--no-renames",
+                        job["payload"].get("base_revision", "HEAD"), "HEAD").splitlines()
+        verify_paths(job["worktree"], committed, allowed)
         write_json(result_path, {"status": "completed", "revision": git(job["worktree"], "rev-parse", "HEAD")})
 
 
@@ -209,13 +211,20 @@ def _gates(job, config, result_path):
     revision = git(job["worktree"], "rev-parse", "HEAD")
     if revision != job["revision"] or git(job["worktree"], "status", "--porcelain"):
         raise RuntimeError("revision_changed")
-    if is_documentation_change(job["worktree"], job["payload"]["base_revision"]):
+    documentation = is_documentation_change(job["worktree"], job["payload"]["base_revision"])
+    if documentation:
         gates = [["git", "diff", "--check", job["payload"]["base_revision"], "HEAD"]]
     else:
         gates = config["quality_gates"]
     if not gates:
         raise RuntimeError("quality_gates_missing")
-    for argv in gates:
+    security = None
+    if not documentation and (config.get("security_gates") or config.get("integration_policy") == "reviewed_code"):
+        security = security_policy(config)
+    commands = [(argv, "quality_gate_failed") for argv in gates]
+    if security:
+        commands += [(argv, "security_gate_failed") for argv in config["security_gates"]]
+    for argv, failure in commands:
         gate_state = result_path.parent / "synthetic-gate-state"
         gate_state.mkdir(mode=0o700, exist_ok=True)
         env = runtime_environment()
@@ -224,9 +233,11 @@ def _gates(job, config, result_path):
                                 stderr=subprocess.DEVNULL, env=env,
                                 timeout=config.get("gate_timeout_seconds", 1800))
         if result.returncode:
-            raise RuntimeError("quality_gate_failed")
+            raise RuntimeError(failure)
     if git(job["worktree"], "rev-parse", "HEAD") != revision or git(job["worktree"], "status", "--porcelain"):
         raise RuntimeError("gate_changed_worktree")
+    if security:
+        write_json(receipt_path(config, job), {"revision": revision, "policy": security, "passed": True, "created_at": time.time()})
     write_json(result_path.parent / "gate-receipt.json", {"revision": revision, "passed": True})
     write_json(result_path, {"status": "completed", "revision": revision, "tests_passed": True})
 

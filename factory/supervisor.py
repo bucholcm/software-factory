@@ -164,7 +164,7 @@ class Supervisor:
             self._block(job, result["blocker"])
             return
         if (job["stage"] == "testing" and result["status"] == "failed"
-                and result.get("blocker") == "quality_gate_failed"):
+                and result.get("blocker") in {"quality_gate_failed", "security_gate_failed"}):
             if job["fix_count"] >= max(1, int(self.config.get("max_fix_attempts", 3))):
                 self.store.update(job["id"], outcome=result)
                 self._block(job, "test_fix_limit")

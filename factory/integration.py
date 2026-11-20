@@ -1,4 +1,4 @@
-"""Serialized, exact-revision integration for the documentation pilot."""
+"""Exact-revision code integration; application activation is a separate stage."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,8 @@ import time
 from .adapters import is_documentation_change
 from .config import command, git, write_json
 from .recovery import code_checkpoint
+from .scope import verify_paths
+from .security import verified as security_verified
 
 
 def integrate_ready(supervisor, config):
@@ -16,10 +18,33 @@ def integrate_ready(supervisor, config):
             continue
         if not config.get("auto_merge") or config["integration_policy"] == "disabled":
             continue
-        # Broader activation requires the mutable-state recovery milestone.
-        if not is_documentation_change(job["worktree"], job["payload"]["base_revision"]):
-            supervisor.store.update(job["id"], blocker="state_recovery_gate_pending")
+        if (git(job["worktree"], "rev-parse", "HEAD") != job["revision"]
+                or job["reviewed_revision"] != job["revision"]
+                or job["review_result"] != "approved" or not job["tests_passed"]
+                or git(job["worktree"], "status", "--porcelain")):
+            supervisor.store.update(job["id"], stage="testing", reviewed_revision="", review_result="",
+                                    tests_passed=False, blocker="", attempt=0)
             continue
+        changed = git(job["worktree"], "diff", "--name-only", "--no-renames",
+                      job["payload"]["base_revision"], job["revision"]).splitlines()
+        verify_paths(job["worktree"], changed, job["payload"].get("allowed_paths"))
+        documentation = is_documentation_change(job["worktree"], job["payload"]["base_revision"])
+        if config["integration_policy"] != "reviewed_code" and not documentation:
+            supervisor.store.update(job["id"], blocker="integration_policy_gate")
+            continue
+        if not documentation:
+            if config.get("integration_checkout_isolated") is not True:
+                supervisor.store.update(job["id"], blocker="integration_checkout_isolation_required")
+                continue
+            try:
+                secured = security_verified(config, job)
+            except RuntimeError:
+                supervisor.store.update(job["id"], blocker="security_gates_unconfigured")
+                continue
+            if not secured:
+                supervisor.store.update(job["id"], stage="testing", reviewed_revision="", review_result="",
+                                        tests_passed=False, blocker="", attempt=0)
+                continue
         repo = config["repo"]
         journal_path = Path(config["state_dir"]) / "integrations" / (job["id"] + ".json")
         if journal_path.exists():
@@ -36,10 +61,6 @@ def integrate_ready(supervisor, config):
                 or git(repo, "symbolic-ref", "--short", "HEAD") != config["base_branch"]
                 or git(repo, "diff", "--name-only") or git(repo, "diff", "--cached", "--name-only")):
             supervisor.store.update(job["id"], blocker="main_checkout_busy")
-            continue
-        if git(job["worktree"], "rev-parse", "HEAD") != job["reviewed_revision"] or not job["tests_passed"]:
-            supervisor.store.update(job["id"], stage="testing", reviewed_revision="", review_result="",
-                                    tests_passed=False, blocker="", attempt=0)
             continue
         base = git(repo, "rev-parse", config["base_branch"])
         ancestor = command(["git", "merge-base", "--is-ancestor", base, job["revision"]], cwd=repo)

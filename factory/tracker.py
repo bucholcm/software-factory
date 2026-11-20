@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import fcntl
 from pathlib import Path
 import re
 
 from .config import command, git, write_json
 from .adapters import documentation_path
+from .scope import scopes_valid, overlaps
 
 
 def bd(config, *args, json_result=False):
@@ -118,9 +120,19 @@ def sync_product_decision(config, store, job, issue):
     return store.resume(job["id"])
 
 
-def reconcile(config, store, enqueue_function):
-    """Only explicitly approved factory-pilot tasks enter this first rollout."""
-    if config.get("maintenance_tracker_enabled", True):
+def reconcile(config, store, enqueue_function, task_id=None):
+    """Serialize automatic intake and exact-ticket submissions together."""
+    with open(Path(config["state_dir"]) / "intake.lock", "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _reconcile(config, store, enqueue_function, task_id)
+
+
+def _reconcile(config, store, enqueue_function, task_id):
+    if task_id:
+        existing = next((job for job in store.jobs() if job["task_id"] == task_id), None)
+        if existing:
+            return {"status": "task_exists", "task_id": task_id, "job_id": existing["id"], "stage": existing["stage"]}
+    if task_id is None and config.get("maintenance_tracker_enabled", True):
         report_path = Path(config["state_dir"]) / "maintenance" / "maintenance.json"
         if report_path.exists():
             from .maintenance_tracker import sync_findings
@@ -131,6 +143,8 @@ def reconcile(config, store, enqueue_function):
     except (OSError, ValueError):
         markers = {}
     for job in store.jobs():
+        if task_id is not None and job["task_id"] != task_id:
+            continue
         fingerprint = ":".join([job["stage"], job["revision"], job["reviewed_revision"], job["blocker"]])
         if markers.get(job["id"]) == fingerprint and not (job["stage"] == "blocked" and job["blocker"] == "product_decision_required"):
             continue
@@ -145,6 +159,8 @@ def reconcile(config, store, enqueue_function):
                 "--set-metadata", "review_result=" + job["review_result"],
                 "--set-metadata", "reviewer=independent-codex-cli-session",
                 "--set-metadata", "factory_blocker=" + job["blocker"]]
+        if job["stage"] == "ready":
+            args += ["--status=in_review"]
         bd(config, *args)
         if job["stage"] == "integrated":
             verified = command(["git", "merge-base", "--is-ancestor", job["revision"], config["base_branch"]], cwd=config["repo"])
@@ -159,7 +175,8 @@ def reconcile(config, store, enqueue_function):
     existing_tasks = {job["task_id"] for job in store.jobs()}
     for issue in active:
         if (issue["id"] not in existing_tasks
-                and issue.get("metadata", {}).get("factory_project") == config["state_dir"]):
+                and issue.get("metadata", {}).get("factory_project") == config["state_dir"]
+                and (task_id is None or task_id == issue["id"])):
             job = enqueue_function(config, issue["id"], issue.get("description", ""),
                                    acceptance=issue.get("acceptance_criteria", ""),
                                    allowed_paths=issue.get("metadata", {}).get("factory_paths", []))
@@ -167,20 +184,31 @@ def reconcile(config, store, enqueue_function):
     implementation_active = implementation_tasks(config, active)
     if len(implementation_active) >= 2:
         return {"status": "at_global_capacity"}
-    ready = bd(config, "ready", json_result=True)
+    ready = bd(config, "ready", "--limit=0", json_result=True)
     candidates = [issue for issue in ready if issue.get("status") == "open" and not issue.get("assignee")
+                  and (task_id is None or task_id == issue["id"])
                   and {"ready-for-development", "factory-pilot"}.issubset(set(issue.get("labels", [])))]
     if not candidates:
-        return {"status": "no_approved_pilot_tasks"}
+        return {"status": "ticket_not_ready_or_approved" if task_id else "no_approved_pilot_tasks"}
     pending = [job for job in store.jobs() if job["stage"] != "integrated"]
     assessed = []
     for candidate in candidates:
         paths = candidate.get("metadata", {}).get("factory_paths", [])
-        if not isinstance(paths, list) or not paths or not all(isinstance(path, str) and documentation_path(path) for path in paths):
+        if not scopes_valid(paths):
+            continue
+        if config.get("task_policy", "documentation_only") != "source" and not all(documentation_path(path) for path in paths):
             continue
         if any(not job["payload"].get("allowed_paths")
-               or any(a == b or a.startswith(b + "/") or b.startswith(a + "/")
-                      for a in paths for b in job["payload"]["allowed_paths"]) for job in pending):
+               or overlaps(paths, job["payload"]["allowed_paths"]) for job in pending):
+            continue
+        external_active = [item for item in implementation_active if item["id"] not in existing_tasks]
+        if any(not scopes_valid(item.get("metadata", {}).get("factory_paths"))
+               or overlaps(paths, item["metadata"]["factory_paths"]) for item in external_active):
+            continue
+        # Reviews retain ownership of their file contracts until integration.
+        in_review = implementation_tasks(config, bd(config, "list", "--status=in_review", json_result=True))
+        if any(not scopes_valid(item.get("metadata", {}).get("factory_paths")) or
+               overlaps(paths, item["metadata"]["factory_paths"]) for item in in_review):
             continue
         assessed.append(candidate)
     if not assessed:

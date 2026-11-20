@@ -128,6 +128,84 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(sum(call[0] == "create" for call in calls), 1)
         self.assertIn(("dep", "add", "question-task", "decision-1"), calls)
 
+    def test_source_intake_is_explicit_and_directory_scope_is_preserved(self):
+        self.candidate["metadata"]["factory_paths"] = ["src/module.py", "tests"]
+        with patch("factory.tracker.bd", side_effect=self.fake_bd), patch("factory.tracker.reviews_clear", return_value=True):
+            denied = reconcile(self.config, self.store, self.fake_enqueue)
+            self.assertEqual(denied["status"], "pilot_scope_or_independence_required")
+            self.config["task_policy"] = "source"
+            with patch.object(self, "fake_enqueue", wraps=self.fake_enqueue) as submit:
+                result = reconcile(self.config, self.store, submit, task_id="pilot-1")
+                self.assertEqual(result["status"], "task_claimed")
+                self.assertEqual(submit.call_args.kwargs["allowed_paths"], ["src/module.py", "tests"])
+
+    def test_exact_ticket_cannot_start_another_candidate(self):
+        with patch("factory.tracker.bd", side_effect=self.fake_bd), patch("factory.tracker.reviews_clear") as reviews:
+            result = reconcile(self.config, self.store, self.fake_enqueue, task_id="another-1")
+        self.assertEqual(result["status"], "ticket_not_ready_or_approved")
+        reviews.assert_not_called()
+        self.assertFalse(any("--claim" in call for call in self.calls))
+
+    def test_existing_ticket_is_idempotent(self):
+        job = self.store.enqueue("pilot-1", self.tmp.name, "factory/pilot-1")
+        with patch("factory.tracker.bd") as tracker:
+            result = reconcile(self.config, self.store, self.fake_enqueue, task_id="pilot-1")
+        self.assertEqual(result["job_id"], job["id"])
+        tracker.assert_not_called()
+
+    def test_source_scope_rejects_private_or_ambiguous_paths(self):
+        self.config["task_policy"] = "source"
+        for path in (".", "../src", "/src", "src/../secrets", ".env", "data.sqlite3", ".beads", "a//b"):
+            with self.subTest(path=path), patch("factory.tracker.bd", side_effect=self.fake_bd), patch("factory.tracker.reviews_clear") as reviews:
+                self.candidate["metadata"]["factory_paths"] = [path]
+                result = reconcile(self.config, self.store, self.fake_enqueue, task_id="pilot-1")
+                self.assertEqual(result["status"], "pilot_scope_or_independence_required")
+                reviews.assert_not_called()
+
+    def test_external_review_reserves_parent_directory_scope(self):
+        self.config["task_policy"] = "source"
+        self.candidate["metadata"]["factory_paths"] = ["src/module.py"]
+        def fake(config, *args, **kwargs):
+            if args == ("list", "--status=in_review"):
+                return [{"id": "external", "metadata": {"factory_paths": ["src"]}}]
+            return self.fake_bd(config, *args, **kwargs)
+        with patch("factory.tracker.bd", side_effect=fake), patch("factory.tracker.reviews_clear") as reviews:
+            result = reconcile(self.config, self.store, self.fake_enqueue)
+        self.assertEqual(result["status"], "pilot_scope_or_independence_required")
+        reviews.assert_not_called()
+
+    def test_external_active_task_reserves_its_scope(self):
+        self.config["task_policy"] = "source"
+        self.candidate["metadata"]["factory_paths"] = ["src/module.py"]
+        for scopes in (["src"], None):
+            with self.subTest(scopes=scopes):
+                def fake(config, *args, **kwargs):
+                    if args == ("list", "--status=in_progress"):
+                        return [{"id": "external", "metadata": {"factory_paths": scopes}}]
+                    return self.fake_bd(config, *args, **kwargs)
+                with patch("factory.tracker.bd", side_effect=fake), patch("factory.tracker.reviews_clear") as reviews:
+                    result = reconcile(self.config, self.store, self.fake_enqueue)
+                self.assertEqual(result["status"], "pilot_scope_or_independence_required")
+                reviews.assert_not_called()
+
+    def test_manual_e2e_review_does_not_block_independent_work(self):
+        def fake(config, *args, **kwargs):
+            if args == ("list", "--status=in_review"):
+                return [{"id": "manual", "labels": ["manual-e2e"]}]
+            return self.fake_bd(config, *args, **kwargs)
+        with patch("factory.tracker.bd", side_effect=fake), patch("factory.tracker.reviews_clear", return_value=True):
+            self.assertEqual(reconcile(self.config, self.store, self.fake_enqueue)["status"], "task_claimed")
+
+    def test_exact_submit_does_not_resume_other_answered_decision(self):
+        job = self.store.enqueue("other-1", self.tmp.name, "factory/other", payload={"allowed_paths": ["docs/other.md"]})
+        self.store.update(job["id"], stage="blocked", blocker="product_decision_required", resume_stage="implementing")
+        with patch("factory.tracker.bd", side_effect=self.fake_bd), patch("factory.tracker.reviews_clear", return_value=True), \
+                patch("factory.tracker.sync_product_decision") as resume:
+            result = reconcile(self.config, self.store, self.fake_enqueue, task_id="pilot-1")
+        self.assertEqual(result["status"], "task_claimed")
+        self.assertEqual(self.store.get(job["id"])["stage"], "blocked")
+        resume.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

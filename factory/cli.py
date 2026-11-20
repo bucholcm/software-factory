@@ -24,12 +24,13 @@ from .worker import process_identity, process_matches
 
 
 def public_jobs(jobs):
-    fields = ("id", "task_id", "runtime", "stage", "attempt", "pid", "revision", "reviewed_revision",
+    fields = ("id", "task_id", "runtime", "stage", "attempt", "pid", "branch", "worktree", "revision", "reviewed_revision",
               "review_result", "tests_passed", "blocker", "updated_at")
     values = [{key: job[key] for key in fields} for job in jobs]
     for value, job in zip(values, jobs):
         value["decision_id"] = job.get("payload", {}).get("decision_id", "")
         value["next_action"] = ("answer_product_decision" if value["decision_id"] and value["stage"] == "blocked"
+                                else "enable_code_integration_or_keep_branch" if value["blocker"] == "integration_policy_gate"
                                 else "await_runtime_recovery" if value["blocker"]
                                 else "await_task" if value["stage"] == "integrated" else value["stage"])
     return values
@@ -49,6 +50,11 @@ def status(config):
     except (OSError, ValueError, TypeError):
         value = {"status": "stopped"}
     value["jobs"] = public_jobs(Store(config["state_dir"]).jobs())
+    value.setdefault("task_policy", config.get("task_policy", "documentation_only"))
+    value.setdefault("integration_policy", config["integration_policy"])
+    value["activation_policy"] = "explicit_release_command"
+    from .release import release_status
+    value["release"] = release_status(config)
     report = Path(config["state_dir"]) / "maintenance" / "maintenance.json"
     if report.exists():
         try:
@@ -122,6 +128,12 @@ def run(config_path):
     has_reconciled = False
     try:
         while not supervisor._stop.is_set():
+            refreshed = load(config_path)
+            if refreshed["repo"] != config["repo"] or refreshed["state_dir"] != config["state_dir"]:
+                raise RuntimeError("running_project_configuration_changed")
+            for key in ("task_policy", "integration_policy", "auto_merge"):
+                if key in refreshed:
+                    config[key] = refreshed[key]
             heartbeat({"jobs": public_jobs(supervisor.store.jobs())}, ready=has_reconciled,
                       phase="reconciling", state="running")
             snapshot = supervisor.tick()
@@ -129,6 +141,8 @@ def run(config_path):
             snapshot["jobs"] = public_jobs(supervisor.store.jobs())
             snapshot["tracker"] = tracker_status
             snapshot["integration_policy"] = config["integration_policy"]
+            snapshot["task_policy"] = config.get("task_policy", "documentation_only")
+            snapshot["activation_policy"] = "explicit_release_command"
             snapshot["auto_merge"] = config["auto_merge"]
             heartbeat(snapshot, ready=True, phase="checking_tracker", state="running")
             if config.get("tracker_enabled") and time.time() >= tracker_next_run:
@@ -178,6 +192,11 @@ def main():
     init.add_argument("--repo", type=Path, required=True)
     init.add_argument("--state-dir", type=Path, required=True)
     sub.add_parser("run")
+    mode = sub.add_parser("set-mode")
+    mode.add_argument("mode", choices=["documentation", "source-review", "source-integrate"])
+    submit = sub.add_parser("submit")
+    submit.add_argument("--task", required=True)
+    submit.add_argument("--project", required=True, type=Path)
     check = sub.add_parser("status")
     check.add_argument("--watch", action="store_true")
     task = sub.add_parser("enqueue")
@@ -185,10 +204,18 @@ def main():
     task.add_argument("--requirements-file", type=Path, required=True)
     task.add_argument("--acceptance", default="")
     task.add_argument("--runtime", choices=["codex", "opencode"])
+    task.add_argument("--allowed-path", action="append", default=[])
     resume = sub.add_parser("resume")
     resume.add_argument("job_id")
     sub.add_parser("maintenance")
     sub.add_parser("checkpoint")
+    sub.add_parser("checkpoint-state")
+    activation = sub.add_parser("activate")
+    activation.add_argument("--revision", required=True)
+    sub.add_parser("recover-release")
+    restore_state = sub.add_parser("restore-state-into")
+    restore_state.add_argument("--checkpoint", type=Path, required=True)
+    restore_state.add_argument("--destination", type=Path, required=True)
     restore = sub.add_parser("restore-code-into")
     restore.add_argument("--checkpoint", type=Path, required=True)
     restore.add_argument("--destination", type=Path, required=True)
@@ -202,7 +229,7 @@ def main():
                   "base_branch": "main", "runtime": "codex", "poll_seconds": 3,
                   "max_attempts": 3, "max_fix_attempts": 3, "max_active_jobs": 1,
                   "job_timeout_seconds": 1800, "agent_timeout_seconds": 900,
-                  "auto_merge": True, "integration_policy": "documentation_only",
+                  "auto_merge": True, "integration_policy": "documentation_only", "task_policy": "documentation_only",
                   "quality_gates": [["make", "check"], ["make", "e2e"]],
                   "maintenance_interval_seconds": 86400,
                   "tracker_enabled": True, "tracker_interval_seconds": 30,
@@ -216,6 +243,30 @@ def main():
     config = load(args.config)
     if args.action == "run":
         run(args.config.resolve())
+    elif args.action == "set-mode":
+        if args.mode == "source-integrate":
+            from .security import policy
+            policy(config)
+            if config.get("integration_checkout_isolated") is not True:
+                raise ValueError("integration_checkout_isolation_required")
+        config.update(task_policy="documentation_only" if args.mode == "documentation" else "source",
+                      integration_policy="reviewed_code" if args.mode == "source-integrate" else "documentation_only",
+                      auto_merge=True)
+        write_json(args.config, config)
+        print(json.dumps({"status": "configuration_updated", "mode": args.mode,
+                          "task_policy": config["task_policy"], "integration_policy": config["integration_policy"]}))
+    elif args.action == "submit":
+        from .tracker import reconcile
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", args.task):
+            raise ValueError("invalid_task_id")
+        common = lambda repo: git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        if Path(common(args.project)).resolve() != Path(common(config["repo"])).resolve():
+            raise ValueError("configuration_belongs_to_another_project")
+        health = status(config)
+        if health.get("status") != "running" or not health.get("ready"):
+            print(json.dumps({"status": "supervisor_not_ready", "task_id": args.task}))
+            return
+        print(json.dumps(reconcile(config, Store(config["state_dir"]), enqueue, task_id=args.task), sort_keys=True))
     elif args.action == "status":
         while True:
             print(json.dumps(status(config), sort_keys=True, indent=2), flush=True)
@@ -223,7 +274,7 @@ def main():
                 break
             time.sleep(5)
     elif args.action == "enqueue":
-        job = enqueue(config, args.task, args.requirements_file.read_text(), args.runtime, args.acceptance)
+        job = enqueue(config, args.task, args.requirements_file.read_text(), args.runtime, args.acceptance, args.allowed_path)
         print(json.dumps(public_jobs([job])[0], sort_keys=True))
     elif args.action == "resume":
         print(json.dumps(public_jobs([Store(config["state_dir"]).resume(args.job_id)])[0]))
@@ -244,6 +295,27 @@ def main():
     elif args.action == "checkpoint":
         checkpoint = code_checkpoint(config["repo"], Path(config["state_dir"]) / "backups", config["base_branch"])
         print(json.dumps({"checkpoint_id": checkpoint.name, "status": "verified"}))
+    elif args.action == "checkpoint-state":
+        from .release import create_checkpoint
+        inventory = config.get("release", {}).get("inventory")
+        checkpoint = create_checkpoint(config["repo"], Path(config["state_dir"]) / "release/backups", inventory, config["base_branch"])
+        print(json.dumps({"checkpoint_id": checkpoint.name, "status": "verified", "consistency": "per_resource"}))
+    elif args.action == "restore-state-into":
+        from .release import restore_into
+        print(json.dumps(restore_into(args.checkpoint, args.destination)))
+    elif args.action == "activate":
+        from .release import activate
+        matches = [job for job in Store(config["state_dir"]).jobs()
+                   if job["stage"] == "integrated" and job["revision"] == args.revision
+                   and job["reviewed_revision"] == args.revision and job["review_result"] == "approved"
+                   and job["tests_passed"]]
+        ancestor = command(["git", "merge-base", "--is-ancestor", args.revision, config["base_branch"]], cwd=config["repo"])
+        if not matches or ancestor.returncode:
+            raise ValueError("activation_requires_verified_integrated_revision")
+        print(json.dumps(activate(config, args.revision)))
+    elif args.action == "recover-release":
+        from .release import recover
+        print(json.dumps(recover(config)))
     elif args.action == "restore-code-into":
         print(json.dumps(restore_code_into(args.checkpoint, args.destination)))
 

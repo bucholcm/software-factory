@@ -45,6 +45,11 @@ def load(path):
         config[field] = str(Path(config[field]).expanduser().resolve())
     if config.get("runtime") not in {"codex", "opencode"}:
         raise ValueError("invalid_runtime")
-    if config.get("integration_policy") not in {"documentation_only", "disabled"}:
+    config.setdefault("task_policy", "documentation_only")
+    if config["task_policy"] not in {"documentation_only", "source"}:
+        raise ValueError("unsupported_task_policy")
+    if config.get("integration_policy") not in {"documentation_only", "reviewed_code", "disabled"}:
         raise ValueError("unsupported_integration_policy")
+    if config["integration_policy"] == "reviewed_code" and config["task_policy"] != "source":
+        raise ValueError("source_task_policy_required")
     return config

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Factory"
+  short_description: "Uruchom fabrykę dla ticketu w bieżącym projekcie"
+  default_prompt: "Użyj $factory, aby obsłużyć wskazany ticket w bieżącym projekcie."
