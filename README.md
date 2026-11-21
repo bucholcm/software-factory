@@ -1,10 +1,47 @@
 # Local Software Factory
 
-A separate local development product. BuchOS is its first project adapter.
+[![Tests](https://github.com/bucholcm/software-factory/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/bucholcm/software-factory/actions/workflows/tests.yml)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+![Platform: macOS and Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-64748B)
+![Execution: local](https://img.shields.io/badge/execution-local-0F766E)
+[![License: not selected](https://img.shields.io/badge/license-not%20selected-64748B)](#license)
+
+Turn project tickets into isolated implementations, tested changes, and
+independent reviews. Start from Codex or OpenCode and follow progress in a
+terminal pane.
+
 The supervisor runs independently of chat sessions. Herdr shows agent terminals
 and status; Codex CLI executes bounded jobs and independent review sessions.
 OpenCode has a read-only planning/review adapter; its implementation sandbox is
-not configured in this pilot. Cloud execution is future work.
+not configured in this pilot. BuchOS is the first project adapter; cloud
+execution is future work.
+
+## See it in Herdr
+
+[![A Herdr status-pane illustration showing a running factory, source-review mode, heartbeat, jobs, and pipeline stages](docs/images/herdr-factory-status.png)](docs/images/herdr-factory-status.png)
+
+*Terminal illustration rendered from live output captured in a real Herdr pane.
+The project is synthetic; this is not a native window screenshot.*
+
+Keep your coding session in one pane and factory status in another. From the
+factory checkout, run:
+
+```sh
+python -m scripts.status_panel --config /private/path/config.json
+```
+
+The view refreshes every five seconds and shows readiness, mode, heartbeat,
+active workers, recent jobs, and blockers. Ctrl+C closes the view while the
+supervisor continues running. Use `--once` for a single snapshot or `--plain`
+for output without terminal colors.
+
+To open it beside the current pane in Herdr:
+
+```sh
+herdr pane split --current --direction right --cwd "$PWD" --no-focus
+# Replace PANE_ID with result.pane.pane_id from the split response.
+herdr pane run PANE_ID 'python -m scripts.status_panel --config /private/path/config.json'
+```
 
 ## Workflow and modes
 
@@ -204,6 +241,10 @@ tag/digest update automation still needs an update-manager adapter.
 
 ## Verification
 
+The Tests workflow runs deterministic tests on macOS and Linux with Python 3.11
+and 3.13. CI uses synthetic data and does not need model credentials or private
+application state. Model-backed smoke tests are separate, explicit commands.
+
 ```sh
 python -m unittest discover -s tests -v
 python -m scripts.smoke_runtime
@@ -214,3 +255,8 @@ python -m scripts.smoke_runtime --source --restart \
 The second command spends model tokens on an actual isolated implementation,
 independent review and automatic integration. It never opens BuchOS financial
 data. Process recovery tests need normal user process-inspection permissions.
+
+## License
+
+A license has not been selected yet. The license badge will be updated when
+the repository owner chooses the reuse terms.

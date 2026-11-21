@@ -1,0 +1,51 @@
+<svg xml:space="preserve" xmlns="http://www.w3.org/2000/svg" width="1600" height="1020" viewBox="0 0 1600 1020">
+<rect width="1600" height="1020" rx="24" fill="#0b111a"/>
+<text x="56" y="62" fill="#f0f5fc" font-family="Arial,sans-serif" font-size="26" font-weight="700">Software Factory in a Herdr pane</text>
+<text x="56" y="96" fill="#9aaac0" font-family="Arial,sans-serif" font-size="17">Synthetic demo · terminal illustration rendered from live Herdr pane output</text>
+<rect x="48" y="132" width="480" height="800" rx="14" fill="#101a27" stroke="#25354a"/>
+<path d="M 62 132 H 514 Q 528 132 528 146 V 180 H 48 V 146 Q 48 132 62 132" fill="#172438"/>
+<text x="72" y="162" fill="#93a9c6" font-family="Arial,sans-serif" font-size="14" letter-spacing="1">PROJECT SESSION · COMMAND EXAMPLES</text>
+<rect x="552" y="132" width="1000" height="800" rx="14" fill="#101a27" stroke="#25354a"/>
+<path d="M 566 132 H 1538 Q 1552 132 1552 146 V 180 H 552 V 146 Q 552 132 566 132" fill="#172438"/>
+<text x="576" y="162" fill="#93a9c6" font-family="Arial,sans-serif" font-size="14" letter-spacing="1">FACTORY STATUS · LIVE CAPTURE</text>
+<text x="76" y="224" fill="#7ba8ff" font-family="Menlo,Consolas,monospace" font-size="19">CURRENT PROJECT</text>
+<text x="76" y="256" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19">factory-demo</text>
+<text x="76" y="288" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19"></text>
+<text x="76" y="320" fill="#63d9cf" font-family="Menlo,Consolas,monospace" font-size="19">Codex</text>
+<text x="76" y="352" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19">$factory TICKET</text>
+<text x="76" y="384" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19">$factory status</text>
+<text x="76" y="416" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19"></text>
+<text x="76" y="448" fill="#63d9cf" font-family="Menlo,Consolas,monospace" font-size="19">OpenCode</text>
+<text x="76" y="480" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19">/factory TICKET</text>
+<text x="76" y="512" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19">/factory status</text>
+<text x="76" y="544" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19"></text>
+<text x="76" y="576" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="19">The supervisor keeps running</text>
+<text x="76" y="608" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="19">when this view closes.</text>
+<text x="76" y="640" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="19"></text>
+<text x="76" y="672" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="19">No application data.</text>
+<text x="76" y="704" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="19">No model jobs started.</text>
+<text x="580" y="220" fill="#63d9cf" font-family="Menlo,Consolas,monospace" font-size="18">LOCAL SOFTWARE FACTORY</text>
+<text x="580" y="248" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">factory-demo</text>
+<text x="580" y="276" fill="#8ba0b8" font-family="Menlo,Consolas,monospace" font-size="18">────────────────────────────────────────────────────────────────</text>
+<text x="580" y="304" fill="#8fe0aa" font-family="Menlo,Consolas,monospace" font-size="18">● RUNNING / READY</text>
+<text x="580" y="332" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18"></text>
+<text x="580" y="360" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Mode         SOURCE REVIEW</text>
+<text x="580" y="388" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Phase        idle</text>
+<text x="580" y="416" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Workers      0 active</text>
+<text x="580" y="444" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Activation   explicit release command</text>
+<text x="580" y="472" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18"></text>
+<text x="580" y="500" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Heartbeat    1s ago</text>
+<text x="580" y="528" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18"></text>
+<text x="580" y="556" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">JOBS</text>
+<text x="580" y="584" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">No jobs submitted. Ready for a project ticket.</text>
+<text x="580" y="612" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18"></text>
+<text x="580" y="640" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">PIPELINE</text>
+<text x="580" y="668" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Implement → Test → Review → Fix → Checkpoint → Integrate</text>
+<text x="580" y="696" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18"></text>
+<text x="580" y="724" fill="#8ba0b8" font-family="Menlo,Consolas,monospace" font-size="18">────────────────────────────────────────────────────────────────</text>
+<text x="580" y="752" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">Codex       $factory TICKET  /  $factory status</text>
+<text x="580" y="780" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18">OpenCode    /factory TICKET  /  /factory status</text>
+<text x="580" y="808" fill="#e5edf8" font-family="Menlo,Consolas,monospace" font-size="18"></text>
+<text x="580" y="836" fill="#8ba0b8" font-family="Menlo,Consolas,monospace" font-size="18">11:29:37  ·  Ctrl+C closes this view, not the supervisor</text>
+<text x="56" y="978" fill="#7b90aa" font-family="Arial,sans-serif" font-size="16">Rendered terminal capture, not a native window screenshot. The status above was read from a real Herdr pane.</text>
+</svg>
