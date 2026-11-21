@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 ![Platform: macOS and Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-64748B)
 ![Execution: local](https://img.shields.io/badge/execution-local-0F766E)
-[![License: not selected](https://img.shields.io/badge/license-not%20selected-64748B)](#license)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22C55E)](LICENSE)
 
 Turn project tickets into isolated implementations, tested changes, and
 independent reviews. Start from Codex or OpenCode and follow progress in a
@@ -258,5 +258,4 @@ data. Process recovery tests need normal user process-inspection permissions.
 
 ## License
 
-A license has not been selected yet. The license badge will be updated when
-the repository owner chooses the reuse terms.
+Licensed under the [MIT License](LICENSE).
