@@ -1,12 +1,16 @@
 ---
 name: factory
-description: Uruchamiaj i nadzoruj lokalną Software Factory dla ticketu w bieżącym projekcie Codexa. Używaj przy poleceniach $factory ID, factory status lub prośbie o przekazanie zadania fabryce.
+description: Uruchamiaj i nadzoruj lokalną Software Factory dla ticketu w bieżącym projekcie Codexa lub OpenCode. Używaj przy poleceniach $factory ID, /factory ID, factory status lub prośbie o przekazanie zadania fabryce.
 ---
 
 # Factory w bieżącym projekcie
 
 `$factory ID` oznacza przekazanie wskazanego ticketu fabryce w projekcie
 otwartym w Codexie. `$factory status` pokazuje stan fabryki tego projektu.
+W OpenCode odpowiedniki to `/factory ID` i `/factory status`; polecenie
+instalowane jest z `integrations/opencode/commands/factory.md`. Oba klienty
+korzystają z tego samego helpera i konfiguracji projektu. Wywołanie z OpenCode
+nie zmienia runtime'u wykonawcy fabryki.
 Bez argumentu sprawdź konfigurację i status; nie wybieraj sam ticketu.
 Nie zakładaj, że `/factory` jest obsługiwane przez każdy klient Codexa.
 

@@ -76,6 +76,14 @@ helper discovers only configurations belonging to that Git repository; it
 requires a selection when multiple configurations match. Each new project needs
 its own configuration and quality gates. Beads is the current tracker adapter.
 
+OpenCode can use the same skill through its `~/.agents/skills` compatibility
+discovery. To add `/factory TICKET` and `/factory status`, link
+`integrations/opencode/commands/factory.md` into
+`~/.config/opencode/commands/factory.md`, then reload OpenCode configuration.
+The command uses the current project and the same supervisor; it does not change
+the configured execution runtime. OpenCode implementation workers remain
+disabled until a verified sandbox profile is configured.
+
 `scripts/install_local.py` installs a reviewed `main` revision to a separate
 durable directory, optional isolated scanner tools, and a per-user macOS
 LaunchAgent. Without `--start` it prepares a candidate service definition;
