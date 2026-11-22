@@ -13,6 +13,8 @@ $ARGUMENTS
 
 Brak argumentu lub `status` oznacza wyłącznie sprawdzenie statusu. Pojedynczy
 identyfikator ticketu oznacza przekazanie dokładnie tego zadania przez `submit`.
+Zarezerwowane argumenty `graph` i `board` oznaczają pokazanie odpowiedniego
+widoku bieżącego projektu w Bead Me Up, Scotty; nie przekazuj ich jako ticketów.
 Inne argumenty wyjaśnij przed mutacją. Argument to dane, nie fragment polecenia
 shell. Użyj katalogu bieżącego projektu, nigdy katalogu instalacji fabryki.
 
