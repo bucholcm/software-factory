@@ -76,6 +76,9 @@ states. A coordinator can be idle between polls while its worker is running.
 Use `--interval 1` for a timer that refreshes every second. The same read-only
 progress projection is available in `factory status` JSON. Token usage is
 currently marked as not collected; model/token/cost telemetry is separate work.
+Repeat `--config` to show an application factory and its repair supervisor in
+one view. Active work is shown first, followed by waiting or blocked jobs; the
+panel keeps four jobs visible while JSON status includes the full history.
 
 To open it beside the current pane in Herdr:
 

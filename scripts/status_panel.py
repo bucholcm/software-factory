@@ -12,6 +12,7 @@ import time
 
 from factory.cli import status
 from factory.config import load
+from factory.progress import summary
 
 
 def duration(seconds):
@@ -21,6 +22,26 @@ def duration(seconds):
     hours, rest = divmod(seconds, 3600)
     minutes, seconds = divmod(rest, 60)
     return f"{hours}h {minutes:02d}m {seconds:02d}s" if hours else f"{minutes:02d}m {seconds:02d}s"
+
+
+def combine(projects):
+    """Merge read-only views; one active repair must remain visible next to a blocked project."""
+    if len(projects) == 1:
+        name, snapshot = projects[0]
+        return snapshot, name
+    jobs, services = [], []
+    for name, snapshot in projects:
+        jobs.extend({**job, "project": name} for job in snapshot.get("jobs", []))
+        services.append({"name": name, "status": snapshot.get("status", "unknown"),
+                         "ready": snapshot.get("ready") is True})
+    healthy = all(s["status"] == "running" and s["ready"] for s in services)
+    heartbeats = [snapshot.get("updated_at") for _, snapshot in projects]
+    value = {"status": "running" if healthy else "degraded", "ready": healthy,
+             "phase": f"monitoring {len(projects)} services", "jobs": jobs,
+             "activity": summary(jobs), "projects": services}
+    if all(type(t) in {int, float} for t in heartbeats):
+        value["updated_at"] = min(heartbeats)
+    return value, " + ".join(name for name, _ in projects)
 
 
 def render(snapshot, project, *, color=False, now=None):
@@ -42,6 +63,9 @@ def render(snapshot, project, *, color=False, now=None):
     task_policy = snapshot.get("task_policy", "documentation_only")
     integration = snapshot.get("integration_policy", "documentation_only")
     mode = ("SOURCE INTEGRATE" if integration == "reviewed_code" else "SOURCE REVIEW") if task_policy == "source" else "DOCUMENTATION"
+    if snapshot.get("projects"):
+        mode = "PER SERVICE"
+        lines += [f"Service      {s['name']}: {s['status']} / {'ready' if s['ready'] else 'not ready'}" for s in snapshot["projects"]]
     lines += [f"Mode         {mode}",
               f"Coordinator  {snapshot.get('phase', 'unknown')}",
               f"Workers      {sum(bool(job.get('progress', {}).get('worker_alive') or job.get('progress', {}).get('owned_group_alive')) for job in snapshot.get('jobs', []))} verified live" if activity else f"Workers      {snapshot.get('active', 0)} reported",
@@ -49,15 +73,15 @@ def render(snapshot, project, *, color=False, now=None):
     updated = snapshot.get("updated_at")
     if isinstance(updated, (int, float)):
         lines += [f"Heartbeat    {max(0, int(now - updated))}s ago", ""]
-    lines += [tint("JOBS", "1;37")]
     jobs = snapshot.get("jobs", [])
+    lines += [tint(f"JOBS ({min(len(jobs), 4)}/{len(jobs)} shown)", "1;37")]
     if not jobs:
         lines += ["No jobs submitted. Ready for a project ticket."]
     def priority(job):
         activity = job.get("progress", {}).get("activity", "")
         return (0 if activity.startswith(("working", "orphaned_worker")) else 1 if activity in {"queued", "retry_wait", "reconciling", "supervisor_unavailable"}
                 else 2 if activity.startswith(("blocked", "failed")) else 3 if activity == "ready_for_delivery" else 4)
-    for job in sorted(reversed(jobs), key=priority)[:6]:
+    for job in sorted(reversed(jobs), key=priority)[:4]:
         progress = job.get("progress", {})
         gate_states = {item["name"]: item["state"] for item in progress.get("milestones", [])}
         tests_label = "passed" if gate_states.get("tests") == "passed" else "pending"
@@ -68,7 +92,7 @@ def render(snapshot, project, *, color=False, now=None):
             elif job["review_result"] == "changes_requested":
                 review_label = "changes requested"
         lines += [f"{job['task_id']}  ·  {job['stage']}",
-                  f"  {progress.get('activity', 'activity unknown')} · {job.get('runtime', 'unknown')} · attempt {job.get('attempt', 0)}",
+                  f"  {job.get('project', project)} · {progress.get('activity', 'activity unknown')} · {job.get('runtime', 'unknown')} · attempt {job.get('attempt', 0)}",
                   f"  Attempt: {duration(progress.get('attempt_elapsed_seconds'))} | Total incl. waits: {duration(progress.get('elapsed_seconds'))}",
                   f"  Tests: {tests_label}  |  Review: {review_label}"]
         milestones = progress.get("milestones", [])
@@ -97,7 +121,7 @@ def render(snapshot, project, *, color=False, now=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--config", type=Path, required=True, action="append", help="Repeat to monitor related project/repair services together")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--plain", action="store_true")
     parser.add_argument("--interval", type=float, default=5)
@@ -106,12 +130,16 @@ def main():
         parser.error("--interval must be at least 1 second")
     try:
         while True:
-            config = load(args.config)
-            snapshot = status(config)
+            projects = []
+            for path in dict.fromkeys(args.config):
+                config = load(path)
+                name = config.get("role") or Path(config["repo"]).name
+                projects.append((name, status(config)))
+            snapshot, name = combine(projects)
             color = sys.stdout.isatty() and not args.plain
             if color and not args.once:
                 print("\033[2J\033[H", end="")
-            print(render(snapshot, Path(config["repo"]).name, color=color), flush=True)
+            print(render(snapshot, name, color=color), flush=True)
             if args.once:
                 break
             time.sleep(args.interval)

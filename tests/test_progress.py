@@ -8,7 +8,7 @@ from factory.cli import status
 from factory.config import write_json
 from factory.progress import project, summary, timelines
 from factory.store import Store
-from scripts.status_panel import duration, render
+from scripts.status_panel import combine, duration, render
 
 
 class ProgressTests(unittest.TestCase):
@@ -144,6 +144,28 @@ class ProgressTests(unittest.TestCase):
             self.assertNotIn('synthetic-private', json.dumps(value))
             self.assertNotIn('process_identity', value['jobs'][0])
             self.assertEqual(100, timelines(store)[job['id']]['first_started_at'])
+
+    def test_multi_service_view_shows_active_repairs_beside_failed_application(self):
+        active = {**self.job, 'task_id': 'repair-1', 'progress': self.value()}
+        self.job['stage'] = 'failed'
+        failed = {**self.job, 'progress': self.value(live=False)}
+        app = {**self.health, 'jobs': [failed], 'updated_at': 155}
+        repair = {**self.health, 'jobs': [active], 'updated_at': 159}
+        snapshot, name = combine([('application', app), ('factory-repair', repair)])
+        self.assertEqual('working', snapshot['activity']['state'])
+        self.assertEqual(1, snapshot['activity']['stalled'])
+        self.assertEqual(155, snapshot['updated_at'])
+        text = render(snapshot, name, now=160)
+        self.assertIn('WORK IN PROGRESS', text)
+        self.assertIn('Service      factory-repair: running / ready', text)
+        self.assertLess(text.index('repair-1'), text.index('synthetic  ·  failed'))
+        repair['status'] = 'stopped'
+        snapshot, _ = combine([('application', app), ('factory-repair', repair)])
+        self.assertEqual('degraded', snapshot['status'])
+        self.assertFalse(snapshot['ready'])
+
+    def test_single_service_combine_preserves_existing_view(self):
+        self.assertEqual((self.health, 'demo'), combine([('demo', self.health)]))
 
     def test_panel_prioritizes_active_jobs_over_old_completed_history(self):
         active = {**self.job, 'progress': self.value()}
