@@ -13,6 +13,7 @@ import time
 from .config import command, git, load, write_json
 from .scope import verify_paths
 from .security import policy as security_policy, receipt_path
+from .environment import ExecutionFailure, prepare
 
 
 SCHEMA = {
@@ -93,6 +94,8 @@ def _prompt(job):
         "Never read local private databases, .env, secrets, provider credentials or real financial state.",
         "Do not mutate Beads, commit, push, merge, launch other agents, change permissions, or start services.",
         "The supervisor owns commits, quality gates, independent review and integration.",
+        "The supervisor prepares configured dependencies before this session. Do not install or upgrade dependencies.",
+        "Use targeted offline checks; report missing tools as a failure, not as a product decision.",
         "Return the requested JSON only. Do not place private data or credentials in output.",
         "Use status blocked only for a genuine human product decision. Include the concrete question,",
         "recommendation and alternatives in question. For completed results question must be an empty string.",
@@ -109,8 +112,9 @@ def _prompt(job):
                   "Set review_result approved or changes_requested. Approval requires no actionable findings."]
     elif job["stage"] == "fixing":
         if job.get("outcome", {}).get("blocker") in {"quality_gate_failed", "security_gate_failed"}:
-            lines += ["The deterministic quality gate failed. Reproduce the repository quality gates on synthetic data,",
-                      "fix the technical failure, and add a relevant regression test. Do not weaken checks."]
+            lines += ["The deterministic quality gate failed. Reproduce the relevant failure with focused offline checks on synthetic data,",
+                      "fix the technical failure, and add a relevant regression test. Do not weaken checks or run dependency installers.",
+                      "The supervisor will rerun the full configured quality gates after your result."]
         findings = Path(job["payload"]["findings_path"])
         if findings.exists():
             lines += ["Fix these review findings:", findings.read_text()]
@@ -126,9 +130,13 @@ def _agent(job, config, result_path):
     write_json(schema_path, SCHEMA)
     prompt = _prompt(job)
     if job["stage"] == "fixing":
-        prompt += "\nReproduce these configured quality gate argv: " + json.dumps(config.get("quality_gates", []))
-        prompt += "\nReproduce these configured security gate argv: " + json.dumps(config.get("security_gates", []))
+        prompt += "\nConfigured quality gate argv (supervisor context; use focused offline checks instead of installer-bearing commands): " + json.dumps(config.get("quality_gates", []))
+        prompt += "\nConfigured security gate argv (supervisor context): " + json.dumps(config.get("security_gates", []))
+        if job.get("outcome", {}).get("diagnostic"):
+            from .worker import sanitize_result
+            prompt += "\nSafe gate failure context: " + json.dumps(sanitize_result(job["outcome"]).get("diagnostic", {}))
     env = runtime_environment()
+    env = prepare(job, config, result_path.parent, env)
     runtime = config.get("review_runtime", job["runtime"]) if review else job["runtime"]
     if runtime == "codex":
         argv = [config["codex_executable"], "exec", "--ephemeral", "--sandbox",
@@ -138,9 +146,20 @@ def _agent(job, config, result_path):
             run = subprocess.run(argv, cwd=job["worktree"], input=prompt, text=True, env=env,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                  timeout=config.get("agent_timeout_seconds", 900))
-            if run.returncode or not raw_path.exists():
-                raise RuntimeError("agent_execution_failed")
-            response = json.loads(raw_path.read_text())
+            if run.returncode:
+                raise ExecutionFailure("agent_process_failed", phase="agent", exit_code=run.returncode)
+            if not raw_path.exists():
+                raise ExecutionFailure("agent_result_missing", phase="agent")
+            if raw_path.stat().st_size > 65536:
+                raise ExecutionFailure("agent_result_invalid", phase="agent")
+            try:
+                response = json.loads(raw_path.read_text())
+            except ValueError:
+                raise ExecutionFailure("agent_result_invalid", phase="agent") from None
+        except FileNotFoundError:
+            raise ExecutionFailure("agent_executable_missing", phase="agent") from None
+        except subprocess.TimeoutExpired:
+            raise ExecutionFailure("agent_timeout", phase="agent") from None
         finally:
             raw_path.unlink(missing_ok=True)
     else:
@@ -150,10 +169,15 @@ def _agent(job, config, result_path):
             raise RuntimeError("opencode_implementation_sandbox_unconfigured")
         argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
                 prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
-        run = subprocess.run(argv, cwd=job["worktree"], text=True, env=env, capture_output=True,
-                             timeout=config.get("agent_timeout_seconds", 900))
+        try:
+            run = subprocess.run(argv, cwd=job["worktree"], text=True, env=env, capture_output=True,
+                                 timeout=config.get("agent_timeout_seconds", 900))
+        except FileNotFoundError:
+            raise ExecutionFailure("agent_executable_missing", phase="agent") from None
+        except subprocess.TimeoutExpired:
+            raise ExecutionFailure("agent_timeout", phase="agent") from None
         if run.returncode:
-            raise RuntimeError("agent_execution_failed")
+            raise ExecutionFailure("agent_process_failed", phase="agent", exit_code=run.returncode)
         texts = []
         for line in run.stdout.splitlines():
             try:
@@ -162,7 +186,10 @@ def _agent(job, config, result_path):
                     texts.append(item.get("part", {}).get("text", ""))
             except ValueError:
                 continue
-        response = json.loads("".join(texts).strip().removeprefix("```json").removesuffix("```").strip())
+        try:
+            response = json.loads("".join(texts).strip().removeprefix("```json").removesuffix("```").strip())
+        except ValueError:
+            raise ExecutionFailure("agent_result_invalid", phase="agent") from None
     if not isinstance(response, dict) or response.get("status") not in {"completed", "blocked", "failed"}:
         raise RuntimeError("invalid_agent_result")
     if response["status"] != "completed":
@@ -173,7 +200,7 @@ def _agent(job, config, result_path):
                 raise RuntimeError("invalid_product_question")
             write_json(Path(job["payload"]["question_path"]), {"question": question})
         write_json(result_path, {"status": response["status"], "blocker": "product_decision_required"
-                                if response["status"] == "blocked" else "agent_execution_failed"})
+                                if response["status"] == "blocked" else "agent_reported_failure"})
         return
     if review:
         if git(job["worktree"], "status", "--porcelain"):
@@ -227,16 +254,25 @@ def _gates(job, config, result_path):
     commands = [(argv, "quality_gate_failed") for argv in gates]
     if security:
         commands += [(argv, "security_gate_failed") for argv in config["security_gates"]]
-    for argv, failure in commands:
+    env = prepare(job, config, result_path.parent, runtime_environment())
+    for index, (argv, failure) in enumerate(commands):
         gate_state = result_path.parent / "synthetic-gate-state"
         gate_state.mkdir(mode=0o700, exist_ok=True)
-        env = runtime_environment()
+        env = dict(env)
         env.update(BUCHOS_STATE_DIR=str(gate_state), BUCHOS_LIFE_WIKI_VAULT_DIR=str(gate_state / "vault"))
-        result = subprocess.run(argv, cwd=job["worktree"], stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, env=env,
-                                timeout=config.get("gate_timeout_seconds", 1800))
+        try:
+            result = subprocess.run(argv, cwd=job["worktree"], stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, env=env,
+                                    timeout=config.get("gate_timeout_seconds", 1800))
+        except FileNotFoundError:
+            raise ExecutionFailure("environment_executable_missing", phase="quality_gate" if failure == "quality_gate_failed" else "security_gate",
+                                   command_index=index) from None
+        except subprocess.TimeoutExpired:
+            raise ExecutionFailure("gate_timeout", phase="quality_gate" if failure == "quality_gate_failed" else "security_gate",
+                                   command_index=index) from None
         if result.returncode:
-            raise RuntimeError(failure)
+            raise ExecutionFailure(failure, phase="quality_gate" if failure == "quality_gate_failed" else "security_gate",
+                                   command_index=index, exit_code=result.returncode)
     if git(job["worktree"], "rev-parse", "HEAD") != revision or git(job["worktree"], "status", "--porcelain"):
         raise RuntimeError("gate_changed_worktree")
     if security:
@@ -260,7 +296,10 @@ def main():
         code = str(error)
         if not re.fullmatch(r"[a-z_]{1,80}", code):
             code = "runtime_execution_failed"
-        write_json(result_path, {"status": "failed", "blocker": code})
+        result = {"status": "failed", "blocker": code}
+        if isinstance(error, ExecutionFailure):
+            result["diagnostic"] = error.diagnostic
+        write_json(result_path, result)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", action="store_true")
     parser.add_argument("--restart", action="store_true")
+    parser.add_argument("--environment", action="store_true", help="Prepare a fresh explicit Python environment before the model")
     parser.add_argument("--security-python", type=Path, help="Python with Bandit installed, required for --source")
     options = parser.parse_args()
     if options.source and not options.security_python:
@@ -30,7 +31,7 @@ def main():
                      ["config", "user.email", "smoke@local.invalid"]):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         (repo / "README.md").write_text("# Synthetic factory runtime test\n")
-        (repo / ".gitignore").write_text("__pycache__/\n*.pyc\n.pytest_cache/\n")
+        (repo / ".gitignore").write_text("__pycache__/\n*.pyc\n.pytest_cache/\n.venv/\n")
         for args in (["add", "README.md", ".gitignore"], ["commit", "-m", "synthetic initial"]):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         path = root / "config.json"
@@ -38,6 +39,10 @@ def main():
                         "--state-dir", str(root / "state")], cwd=package, check=True, capture_output=True)
         config = load(path)
         config.update(tracker_enabled=False, poll_seconds=1, agent_timeout_seconds=240, job_timeout_seconds=300)
+        if options.environment:
+            config["environment"] = {"python": __import__("sys").executable,
+                                     "fingerprint_files": ["README.md"],
+                                     "checks": [["{venv_python}", "-I", "-c", "import unittest"]]}
         if options.source:
             config.update(task_policy="source", integration_policy="reviewed_code",
                           integration_checkout_isolated=True,

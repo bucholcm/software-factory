@@ -57,6 +57,12 @@ na pierwszym planie; wykonuj to w trwałej sesji terminala i potwierdź gotowoś
 Z katalogu kodu fabryki uruchom `python -m factory --config CONFIG status`.
 Oceń gotowość, świeżość heartbeat, aktywne zadania, tracker i politykę integracji.
 Istniejący supervisor pozostaje właścicielem wykonania. Nie startuj drugiego.
+Przy awarii odczytaj także `factory --config CONFIG reliability` i bezpieczne
+pole `diagnostic` zadania. Błędy `environment_*` wymagają naprawy profilu lub
+zależności i wznowienia TEGO SAMEGO joba, a nie nowego enqueue. Dla prośby o
+niezawodność fabryki zastosuj `skills/factory-reliability/SKILL.md` z checkoutu
+fabryki: domknij naprawę mechanizmu, testy, niezależne review i weryfikację na
+projekcie. Sama diagnoza lub restart nie kończy takiego zadania.
 Jeśli supervisor nie działa, uruchom `python -m factory --config CONFIG run`
 w trwałym terminalu lub istniejącym mechanizmie usług tego projektu, zachowując
 możliwość inspekcji i zatrzymania. Obserwuj świeży, gotowy heartbeat i zgodną

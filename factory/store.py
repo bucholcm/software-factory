@@ -49,6 +49,23 @@ class Store:
                     job_id TEXT NOT NULL, stage TEXT NOT NULL,
                     code TEXT NOT NULL, created_at REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS reliability_incidents (
+                    signature TEXT PRIMARY KEY, stage TEXT NOT NULL,
+                    blocker TEXT NOT NULL, diagnostic TEXT NOT NULL,
+                    occurrences INTEGER NOT NULL DEFAULT 0,
+                    first_seen REAL NOT NULL, last_seen REAL NOT NULL,
+                    recovered_at REAL, last_job_id TEXT NOT NULL,
+                    revision TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS reliability_observations (
+                    job_id TEXT NOT NULL, attempt_dir TEXT NOT NULL,
+                    PRIMARY KEY(job_id, attempt_dir)
+                );
+                CREATE TABLE IF NOT EXISTS reliability_affected_jobs (
+                    signature TEXT NOT NULL, job_id TEXT NOT NULL,
+                    stage TEXT NOT NULL, recovered_at REAL,
+                    PRIMARY KEY(signature, job_id)
+                );
             """)
         os.chmod(self.path, 0o600)
 
@@ -121,7 +138,7 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT INTO events(job_id,stage,code,created_at) VALUES(?,?,?,?)", (job_id, stage, code, time.time()))
 
-    def resume(self, job_id: str) -> dict:
+    def resume(self, job_id: str, *, retest=False) -> dict:
         job = self.get(job_id)
         if job is None or job["stage"] not in {"blocked", "failed"}:
             raise ValueError("job_not_resumable")
@@ -132,5 +149,14 @@ class Store:
         stage = job["resume_stage"] or "implementing"
         if stage not in {"implementing", "testing", "reviewing", "fixing"}:
             raise ValueError("invalid_resume_stage")
+        extra = {}
+        if retest:
+            from .config import git
+            if stage not in {"testing", "fixing"} or job["review_result"] == "changes_requested" or not job["revision"]:
+                raise ValueError("retest_requires_unreviewed_test_failure")
+            if git(job["worktree"], "rev-parse", "HEAD") != job["revision"] or git(job["worktree"], "status", "--porcelain"):
+                raise ValueError("retest_revision_changed")
+            stage = "testing"
+            extra = {"tests_passed": False, "reviewed_revision": "", "review_result": ""}
         return self.update(job_id, stage=stage, attempt=0, blocker="", next_run=0, pid=None,
-                           process_identity="", attempt_dir="", started_at=0)
+                           process_identity="", attempt_dir="", started_at=0, **extra)

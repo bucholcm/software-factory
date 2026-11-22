@@ -67,6 +67,19 @@ active workers, recent jobs, and blockers. Ctrl+C closes the view while the
 supervisor continues running. Use `--once` for a single snapshot or `--plain`
 for output without terminal colors.
 
+While a verified worker is alive, the panel shows **WORK IN PROGRESS**, the
+current stage, the running attempt's elapsed time, total age including waits,
+and verified implementation/test/review milestones for the current revision.
+Fixes invalidate the affected milestones and show a new verification cycle.
+Retry waits, blocked work, stale supervisors and reviewed branches have distinct
+states. A coordinator can be idle between polls while its worker is running.
+Use `--interval 1` for a timer that refreshes every second. The same read-only
+progress projection is available in `factory status` JSON. Token usage is
+currently marked as not collected; model/token/cost telemetry is separate work.
+Repeat `--config` to show an application factory and its repair supervisor in
+one view. Active work is shown first, followed by waiting or blocked jobs; the
+panel keeps four jobs visible while JSON status includes the full history.
+
 To open it beside the current pane in Herdr:
 
 ```sh
@@ -76,6 +89,13 @@ herdr pane run PANE_ID 'python -m scripts.status_panel --config /private/path/co
 ```
 
 ## Workflow and modes
+
+Project dependencies and operational feedback are described in the
+[environment and reliability-loop guide](docs/reliability-loop.md). An explicit
+profile prepares a fresh worktree before the model starts, checks system tools,
+and blocks environment failures without spending code-fix retries. Sanitized
+incidents survive restarts and can drive bounded factory repair jobs in a
+separate supervisor, with tests and independent review before controlled rollout.
 
 The journaled workflow is implementation → deterministic checks → independent
 review of the exact commit → fixes/retest → verified code checkpoint → automatic
