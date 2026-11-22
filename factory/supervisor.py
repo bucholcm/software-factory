@@ -118,10 +118,14 @@ class Supervisor:
             return None
 
     def _block(self, job, code):
+        from .reliability import observe
+        observe(self.store, job, {"status": "blocked", "blocker": code})
         self.store.update(job["id"], stage="blocked", resume_stage=job["stage"], blocker=code)
         self.store.event(job["id"], job["stage"], code)
 
     def _retry(self, job, code):
+        from .reliability import observe
+        observe(self.store, job, {"status": "failed", "blocker": code})
         if job["attempt"] >= self.max_attempts:
             self.store.update(job["id"], stage="failed", resume_stage=job["stage"], blocker=code,
                               pid=None, process_identity="", attempt_dir="", started_at=0)
@@ -160,6 +164,14 @@ class Supervisor:
 
     def _finish(self, job, result):
         result = sanitize_result(result)
+        from .reliability import observe
+        if result["status"] != "completed":
+            observe(self.store, job, result)
+            self.store.update(job["id"], outcome=result)
+        if (result.get("blocker", "").startswith("environment_")
+                or result.get("blocker") in {"agent_executable_missing", "agent_result_invalid"}):
+            self._block(job, result["blocker"])
+            return
         if result["status"] == "blocked":
             self._block(job, result["blocker"])
             return
@@ -223,6 +235,7 @@ class Supervisor:
             else:
                 self._block(job, "invalid_review")
                 return
+        observe(self.store, job, result, verified_delivery=stage == "reviewing" and result.get("review_result") == "approved")
         self.store.update(job["id"], **changes)
         self.store.event(job["id"], changes["stage"], "stage_advanced")
 

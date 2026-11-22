@@ -85,14 +85,25 @@ def group_exists(pgid: int) -> bool:
 def sanitize_result(value) -> dict:
     if not isinstance(value, dict):
         return {"status": "failed", "blocker": "invalid_agent_result"}
-    result = {"status": value.get("status") if value.get("status") in {"completed", "blocked", "failed"} else "failed"}
+    status = value.get("status")
+    result = {"status": status if isinstance(status, str) and status in {"completed", "blocked", "failed"} else "failed"}
     for key in ("revision", "reviewed_revision"):
         if isinstance(value.get(key), str) and SHA.fullmatch(value[key]):
             result[key] = value[key]
     if type(value.get("tests_passed")) is bool:
         result["tests_passed"] = value["tests_passed"]
-    if value.get("review_result") in {"approved", "changes_requested"}:
+    if isinstance(value.get("review_result"), str) and value["review_result"] in {"approved", "changes_requested"}:
         result["review_result"] = value["review_result"]
+    diagnostic = value.get("diagnostic")
+    if isinstance(diagnostic, dict):
+        safe = {}
+        if isinstance(diagnostic.get("phase"), str) and diagnostic["phase"] in {"preflight", "venv", "python", "bootstrap", "environment_check", "agent", "quality_gate", "security_gate"}:
+            safe["phase"] = diagnostic["phase"]
+        for key in ("command_index", "exit_code"):
+            if type(diagnostic.get(key)) is int and (0 if key == "command_index" else -65536) <= diagnostic[key] <= 65536:
+                safe[key] = diagnostic[key]
+        if safe:
+            result["diagnostic"] = safe
     if isinstance(value.get("runtime_session_id"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value["runtime_session_id"]):
         result["runtime_session_id"] = value["runtime_session_id"]
     if result["status"] != "completed":

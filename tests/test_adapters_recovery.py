@@ -100,7 +100,7 @@ class RecoveryTests(unittest.TestCase):
             (attempt / "native-result.json").write_text("synthetic-private-response")
             return subprocess.CompletedProcess(args[0], 1)
         with patch("factory.adapters.subprocess.run", side_effect=failure):
-            with self.assertRaisesRegex(RuntimeError, "agent_execution_failed"):
+            with self.assertRaisesRegex(RuntimeError, "agent_process_failed"):
                 _agent(job, {"codex_executable": "codex"}, result)
         self.assertFalse((attempt / "native-result.json").exists())
 

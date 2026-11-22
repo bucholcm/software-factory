@@ -55,4 +55,15 @@ def load(path):
         raise ValueError("unsupported_integration_policy")
     if config["integration_policy"] == "reviewed_code" and config["task_policy"] != "source":
         raise ValueError("source_task_policy_required")
+    if "environment" in config:
+        from .environment import validate_profile
+        validate_profile(config["environment"])
+    sources = config.get("reliability_sources", [])
+    paths = [config[k] for k in ("reliability_tracker_repo", "reliability_repair_config", "reliability_factory_repo") if k in config]
+    if (not isinstance(sources, list) or any(not isinstance(s, str) or not Path(s).is_absolute() for s in sources)
+            or any(not isinstance(s, str) or not Path(s).is_absolute() for s in paths)):
+        raise ValueError("invalid_reliability_configuration")
+    interval = config.get("reliability_interval_seconds", 60)
+    if type(interval) not in {int, float} or not 30 <= interval <= 86400:
+        raise ValueError("invalid_reliability_interval")
     return config

@@ -28,9 +28,14 @@ def public_jobs(jobs):
               "review_result", "tests_passed", "blocker", "updated_at")
     values = [{key: job[key] for key in fields} for job in jobs]
     for value, job in zip(values, jobs):
+        from .worker import sanitize_result
+        diagnostic = sanitize_result(job.get("outcome", {})).get("diagnostic")
+        if diagnostic:
+            value["diagnostic"] = diagnostic
         value["decision_id"] = job.get("payload", {}).get("decision_id", "")
         value["next_action"] = ("answer_product_decision" if value["decision_id"] and value["stage"] == "blocked"
                                 else "enable_code_integration_or_keep_branch" if value["blocker"] == "integration_policy_gate"
+                                else "repair_project_environment_then_resume" if value["blocker"].startswith("environment_")
                                 else "await_runtime_recovery" if value["blocker"]
                                 else "await_task" if value["stage"] == "integrated" else value["stage"])
     return values
@@ -125,6 +130,8 @@ def run(config_path):
     scan_next_run = 0
     tracker_next_run = 0
     tracker_status = {"status": "not_checked"}
+    feedback_process = None
+    feedback_next_run = 0
     has_reconciled = False
     try:
         while not supervisor._stop.is_set():
@@ -163,6 +170,13 @@ def run(config_path):
             snapshot["integration_policy"] = config["integration_policy"]
             snapshot["auto_merge"] = config["auto_merge"]
             heartbeat(snapshot, ready=True, phase="idle", state="running")
+            if ((refreshed.get("reliability_tracker_repo") or refreshed.get("reliability_repair_config")) and time.time() >= feedback_next_run
+                    and (feedback_process is None or feedback_process.poll() is not None)):
+                feedback_process = subprocess.Popen(
+                    [sys.executable, "-m", "factory", "--config", str(config_path), "reliability", "--sync"],
+                    cwd=package_root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, start_new_session=True)
+                feedback_next_run = time.time() + max(30, float(refreshed.get("reliability_interval_seconds", 60)))
             maintenance_dir = Path(config["state_dir"]) / "maintenance"
             report = maintenance_dir / "maintenance.json"
             due = not report.exists() or time.time() - report.stat().st_mtime > config.get("maintenance_interval_seconds", 86400)
@@ -207,7 +221,13 @@ def main():
     task.add_argument("--allowed-path", action="append", default=[])
     resume = sub.add_parser("resume")
     resume.add_argument("job_id")
+    resume.add_argument("--retest", action="store_true", help="Recheck the unchanged failed revision after environment repair; still requires independent review")
     sub.add_parser("maintenance")
+    feedback = sub.add_parser("reliability")
+    feedback.add_argument("--sync", action="store_true")
+    feedback.add_argument("--dispatch", action="store_true")
+    environment = sub.add_parser("prepare-environment")
+    environment.add_argument("job_id")
     sub.add_parser("checkpoint")
     sub.add_parser("checkpoint-state")
     activation = sub.add_parser("activate")
@@ -277,7 +297,35 @@ def main():
         job = enqueue(config, args.task, args.requirements_file.read_text(), args.runtime, args.acceptance, args.allowed_path)
         print(json.dumps(public_jobs([job])[0], sort_keys=True))
     elif args.action == "resume":
-        print(json.dumps(public_jobs([Store(config["state_dir"]).resume(args.job_id)])[0]))
+        print(json.dumps(public_jobs([Store(config["state_dir"]).resume(args.job_id, retest=args.retest)])[0]))
+    elif args.action == "prepare-environment":
+        from .environment import prepare
+        from .adapters import runtime_environment
+        job = Store(config["state_dir"]).get(args.job_id)
+        if config.get("environment") is None:
+            raise ValueError("environment_profile_unconfigured")
+        from .worker import group_exists
+        if (not job or job["stage"] not in {"failed", "blocked"}
+                or (job["pid"] and (process_matches(job["pid"], job["process_identity"]) or group_exists(job["pid"])))):
+            raise ValueError("environment_repair_requires_stopped_job")
+        prepare(job, config, None, runtime_environment())
+        print(json.dumps({"status": "environment_ready", "job_id": job["id"]}))
+    elif args.action == "reliability":
+        from .reliability import report, sync, dispatch
+        from .tracker import bd
+        if args.sync or args.dispatch:
+            path = Path(config["state_dir"]) / "reliability" / "sync-status.json"
+            try:
+                value = sync(config, bd)
+                if args.dispatch or config.get("reliability_repair_config"):
+                    value["repair"] = dispatch(config)
+            except Exception:
+                write_json(path, {"status": "tracker_unavailable", "updated_at": time.time()})
+                raise RuntimeError("reliability_tracker_unavailable") from None
+            write_json(path, {**value, "updated_at": time.time()})
+        else:
+            value = report(config)
+        print(json.dumps(value, sort_keys=True, indent=2))
     elif args.action == "maintenance":
         from .maintenance import scan
         directory = Path(config["state_dir"]) / "maintenance"

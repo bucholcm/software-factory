@@ -77,6 +77,13 @@ herdr pane run PANE_ID 'python -m scripts.status_panel --config /private/path/co
 
 ## Workflow and modes
 
+Project dependencies and operational feedback are described in the
+[environment and reliability-loop guide](docs/reliability-loop.md). An explicit
+profile prepares a fresh worktree before the model starts, checks system tools,
+and blocks environment failures without spending code-fix retries. Sanitized
+incidents survive restarts and can drive bounded factory repair jobs in a
+separate supervisor, with tests and independent review before controlled rollout.
+
 The journaled workflow is implementation → deterministic checks → independent
 review of the exact commit → fixes/retest → verified code checkpoint → automatic
 integration. A killed supervisor adopts its existing worker, rather than starting
