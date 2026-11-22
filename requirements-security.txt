@@ -1,0 +1,2 @@
+# Development/CI tooling only; the factory has no runtime package dependencies.
+bandit==1.9.4
