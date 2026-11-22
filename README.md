@@ -31,12 +31,19 @@ See the [workflow guide and runnable synthetic graph](docs/beads-scotty-workflow
 You can also ask for `$factory graph` in Codex or `/factory graph` in OpenCode.
 The demo creates real Beads relations for Scotty without starting model workers.
 
+[![Scotty dependency graph with six synthetic Beads tickets and blocking, parent-child, and related edges](docs/images/scotty-dependency-graph.png)](docs/images/scotty-dependency-graph.png)
+
+*Actual Scotty screenshot of the synthetic demo project, with native Beads
+relations and read-only mode enabled.*
+
 ## See it in Herdr
 
-[![A Herdr status-pane illustration showing a running factory, source-review mode, heartbeat, jobs, and pipeline stages](docs/images/herdr-factory-status.png)](docs/images/herdr-factory-status.png)
+[![Illustrative Herdr layout with an agents panel, factory status, and a Codex or OpenCode delivery terminal](docs/images/herdr-factory-status.png)](docs/images/herdr-factory-status.png)
 
-*Terminal illustration rendered from live output captured in a real Herdr pane.
-The project is synthetic; this is not a native window screenshot.*
+*Illustrative Herdr layout: agents on the left, factory status in the middle,
+and a delivery report in the coding-agent terminal on the right. The ticket,
+status, and delivery report are synthetic examples; this is not a native window
+screenshot, and no model job ran to produce this image.*
 
 Keep your coding session in one pane and factory status in another. From the
 factory checkout, run:
