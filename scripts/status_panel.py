@@ -44,7 +44,7 @@ def render(snapshot, project, *, color=False, now=None):
     mode = ("SOURCE INTEGRATE" if integration == "reviewed_code" else "SOURCE REVIEW") if task_policy == "source" else "DOCUMENTATION"
     lines += [f"Mode         {mode}",
               f"Coordinator  {snapshot.get('phase', 'unknown')}",
-              f"Workers      {sum(bool(job.get('progress', {}).get('worker_alive')) for job in snapshot.get('jobs', []))} verified live" if activity else f"Workers      {snapshot.get('active', 0)} reported",
+              f"Workers      {sum(bool(job.get('progress', {}).get('worker_alive') or job.get('progress', {}).get('owned_group_alive')) for job in snapshot.get('jobs', []))} verified live" if activity else f"Workers      {snapshot.get('active', 0)} reported",
               "Activation   explicit release command", ""]
     updated = snapshot.get("updated_at")
     if isinstance(updated, (int, float)):
@@ -55,14 +55,22 @@ def render(snapshot, project, *, color=False, now=None):
         lines += ["No jobs submitted. Ready for a project ticket."]
     def priority(job):
         activity = job.get("progress", {}).get("activity", "")
-        return (0 if activity.startswith("working") else 1 if activity in {"queued", "retry_wait", "reconciling", "supervisor_unavailable"}
+        return (0 if activity.startswith(("working", "orphaned_worker")) else 1 if activity in {"queued", "retry_wait", "reconciling", "supervisor_unavailable"}
                 else 2 if activity.startswith(("blocked", "failed")) else 3 if activity == "ready_for_delivery" else 4)
     for job in sorted(reversed(jobs), key=priority)[:6]:
         progress = job.get("progress", {})
+        gate_states = {item["name"]: item["state"] for item in progress.get("milestones", [])}
+        tests_label = "passed" if gate_states.get("tests") == "passed" else "pending"
+        review_label = "approved" if gate_states.get("review") == "passed" else "pending"
+        if review_label != "approved" and job.get("review_result"):
+            if job.get("reviewed_revision") != job.get("revision"):
+                review_label = "stale"
+            elif job["review_result"] == "changes_requested":
+                review_label = "changes requested"
         lines += [f"{job['task_id']}  ·  {job['stage']}",
                   f"  {progress.get('activity', 'activity unknown')} · {job.get('runtime', 'unknown')} · attempt {job.get('attempt', 0)}",
                   f"  Attempt: {duration(progress.get('attempt_elapsed_seconds'))} | Total incl. waits: {duration(progress.get('elapsed_seconds'))}",
-                  f"  Tests: {'passed' if job.get('tests_passed') else 'pending'}  |  Review: {job.get('review_result') or 'pending'}"]
+                  f"  Tests: {tests_label}  |  Review: {review_label}"]
         milestones = progress.get("milestones", [])
         if milestones:
             marks = {"passed": "✓", "current": "▶", "pending": "·"}
@@ -74,7 +82,9 @@ def render(snapshot, project, *, color=False, now=None):
         lines += ["  Tokens: not collected", ""]
         if job.get("blocker"):
             lines += [tint("  Blocker: " + job["blocker"], "33"), ""]
-        if progress.get("activity") == "working_supervisor_unavailable":
+        if progress.get("activity", "").startswith("orphaned_worker"):
+            lines += [tint("  Wrapper is gone; its owned process group is still alive.", "33")]
+        if progress.get("activity", "").endswith("supervisor_unavailable") and (progress.get("worker_alive") or progress.get("owned_group_alive")):
             lines += [tint("  Worker is alive; supervisor heartbeat is unavailable.", "33")]
     lines += ["", tint("PIPELINE", "1;37"),
               "Implement → Test → Review → Fix → Checkpoint → Integrate",

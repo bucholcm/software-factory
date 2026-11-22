@@ -29,7 +29,7 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual('working', first['activity'])
         self.assertEqual(40, first['attempt_elapsed_seconds'])
         self.assertEqual(50, later['attempt_elapsed_seconds'])
-        self.assertEqual(60, first['elapsed_seconds'])
+        self.assertEqual(70, first['elapsed_seconds'])
         self.assertEqual(1, first['verified_steps'])
         self.assertEqual(['passed', 'current', 'pending'], [x['state'] for x in first['milestones']])
         self.assertIsNone(first['tokens'])
@@ -48,10 +48,45 @@ class ProgressTests(unittest.TestCase):
     def test_delivery_time_freezes_despite_repeated_policy_updates(self):
         self.job.update(stage='ready', tests_passed=True, reviewed_revision='a'*40, review_result='approved', updated_at=999)
         self.timeline['delivered_at'] = 150
-        self.assertEqual(50, self.value(now=160, live=False)['elapsed_seconds'])
-        self.assertEqual(50, self.value(now=990, live=False)['elapsed_seconds'])
+        self.assertEqual(60, self.value(now=160, live=False)['elapsed_seconds'])
+        self.assertEqual(60, self.value(now=990, live=False)['elapsed_seconds'])
         self.assertEqual('ready_for_delivery', self.value(live=False)['activity'])
         self.assertEqual(3, self.value(live=False)['verified_steps'])
+
+    def test_total_age_does_not_reset_when_first_worker_starts(self):
+        self.timeline = {}
+        self.job.update(stage='implementing', attempt_dir='', started_at=0)
+        queued = self.value(live=False)
+        self.timeline['first_started_at'] = 160
+        self.job.update(attempt_dir='attempt', started_at=160)
+        started = self.value()
+        self.assertEqual(70, queued['elapsed_seconds'])
+        self.assertEqual(queued['elapsed_seconds'], started['elapsed_seconds'])
+        self.assertEqual(0, started['attempt_elapsed_seconds'])
+
+    def test_integrated_clock_includes_wait_after_review_and_integration(self):
+        self.job.update(stage='integrated', tests_passed=True, reviewed_revision='a'*40, review_result='approved')
+        self.timeline.update(delivered_at=150, integrated_at=300)
+        self.assertEqual(210, self.value(now=990, live=False)['elapsed_seconds'])
+
+    def test_stale_review_is_never_printed_as_approved(self):
+        self.job.update(stage='ready', tests_passed=True, reviewed_revision='b'*40, review_result='approved')
+        job = {**self.job, 'progress': self.value(live=False)}
+        snapshot = {**self.health, 'jobs': [job], 'activity': summary([job])}
+        text = render(snapshot, 'demo', now=160)
+        self.assertIn('Review: stale', text)
+        self.assertNotIn('Review: approved', text)
+
+    def test_orphaned_owned_process_group_stays_visible_as_running_work(self):
+        progress = project(self.job, self.health, self.timeline, now=160, group_alive=True)
+        self.assertEqual('orphaned_worker', progress['activity'])
+        self.assertEqual(40, progress['attempt_elapsed_seconds'])
+        job = {**self.job, 'progress': progress}
+        snapshot = {**self.health, 'jobs': [job], 'activity': summary([job])}
+        text = render(snapshot, 'demo', now=160)
+        self.assertIn('WORK IN PROGRESS', text)
+        self.assertIn('1 verified live', text)
+        self.assertIn('owned process group is still alive', text)
 
     def test_retry_queue_and_completion_reconciliation_do_not_claim_working(self):
         self.job.update(next_run=175)
@@ -96,13 +131,14 @@ class ProgressTests(unittest.TestCase):
             job = store.enqueue('synthetic', directory, 'factory/synthetic', payload={'requirements': 'synthetic-private'})
             store.update(job['id'], stage='testing', pid=321, process_identity='worker', started_at=120, revision='a'*40)
             with store.connect() as db:
+                db.execute('UPDATE jobs SET created_at=? WHERE id=?', (90, job['id']))
                 db.execute('INSERT INTO events(job_id,stage,code,created_at) VALUES(?,?,?,?)', (job['id'], 'implementing', 'worker_started', 100))
             write_json(Path(directory)/'status.json', {'status': 'running', 'ready': True, 'pid': 123,
                                                        'process_identity': 'supervisor', 'updated_at': 159})
             with patch('factory.cli.time.time', return_value=160), patch('factory.cli.process_matches', return_value=True):
                 value = status(config)
             progress = value['jobs'][0]['progress']
-            self.assertEqual(60, progress['elapsed_seconds'])
+            self.assertEqual(70, progress['elapsed_seconds'])
             self.assertEqual(1, progress['attempts_started'])
             self.assertEqual('working', value['activity']['state'])
             self.assertNotIn('synthetic-private', json.dumps(value))
