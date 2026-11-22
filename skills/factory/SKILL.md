@@ -11,6 +11,11 @@ W OpenCode odpowiedniki to `/factory ID` i `/factory status`; polecenie
 instalowane jest z `integrations/opencode/commands/factory.md`. Oba klienty
 korzystają z tego samego helpera i konfiguracji projektu. Wywołanie z OpenCode
 nie zmienia runtime'u wykonawcy fabryki.
+`$factory graph` / `/factory graph` pokazuje graf bieżącego projektu w Scotty;
+`board` zamiast `graph` wybiera tablicę. Są to prośby o widok, nie identyfikatory
+ticketów do przekazania wykonawcy.
+Dla tych argumentów przejdź bezpośrednio do sekcji „Board i graf Scotty”.
+Nie inicjalizuj konfiguracji fabryki ani supervisora dla samego widoku.
 Bez argumentu sprawdź konfigurację i status; nie wybieraj sam ticketu.
 Nie zakładaj, że `/factory` jest obsługiwane przez każdy klient Codexa.
 
@@ -57,6 +62,24 @@ w trwałym terminalu lub istniejącym mechanizmie usług tego projektu, zachowuj
 możliwość inspekcji i zatrzymania. Obserwuj świeży, gotowy heartbeat i zgodną
 tożsamość procesu przed ogłoszeniem startu. Herdr stosuj tylko na prośbę
 użytkownika i zgodnie z jego skillem; nie jest warunkiem użycia fabryki.
+
+## Board i graf Scotty
+
+Dla prośby `graph` albo `board` użyj zainstalowanego Bead Me Up, Scotty.
+Potwierdź bazę bieżącego projektu przez `bd where`; jeśli jej nie ma, zgłoś brak
+zamiast inicjalizować bazę bez prośby użytkownika.
+Najpierw sprawdź, czy serwer już działa. Gdy nie działa, uruchom w katalogu
+projektu `scotty --host 127.0.0.1 --no-open` w trwałym terminalu. Nie uruchamiaj
+drugiego serwera bez potrzeby. Wybierz właściwy projekt i potwierdź jego ścieżkę
+oraz dane `bd/live`, nie wbudowany tryb demo. Widok grafu to
+`/p/PROJECT_ID?view=graph`, a tablica `/p/PROJECT_ID?view=board`; użyj rzeczywistego
+adresu i ID z działającej instalacji. Otwórz przeglądarkę dostępnym narzędziem
+lub zwróć klikalny adres, gdy otwarcie nie jest dostępne. Nie deklaruj otwartego
+widoku bez obserwacji. Jeśli `scotty` jest niedostępne, zgłoś to i pokaż zależności
+przez `bd`; nie buduj nowego boardu i nie inicjalizuj zastępczej bazy.
+Prośba o widok nie autoryzuje claimu, zmiany zadań ani uruchomienia fabryki.
+Pełny opis workflow i syntetyczny przykład są w `docs/beads-scotty-workflow.md`
+w repozytorium fabryki.
 
 ## Ticket
 

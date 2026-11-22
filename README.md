@@ -26,6 +26,21 @@ OpenCode has a read-only planning/review adapter; its implementation sandbox is
 not configured in this pilot. BuchOS is the first project adapter; cloud
 execution is future work.
 
+## Beads → Scotty → Factory → Herdr
+
+Requirements and product decisions stay with the human. Beads stores tasks,
+ownership and native dependency edges. **Bead Me Up, Scotty** shows the board
+and graph over those records. The factory handles eligible work, tests and
+independent review; Herdr shows the terminals and status.
+
+A decision blocks only dependent tasks. Independent scoped work can continue.
+An epic groups tasks; actual prerequisites use blocking edges. Review belongs
+to an exact commit, and completion is recorded only after verification.
+
+See the [workflow guide and runnable synthetic graph](docs/beads-scotty-workflow.md).
+You can also ask for `$factory graph` in Codex or `/factory graph` in OpenCode.
+The demo creates real Beads relations for Scotty without starting model workers.
+
 ## See it in Herdr
 
 [![A Herdr status-pane illustration showing a running factory, source-review mode, heartbeat, jobs, and pipeline stages](docs/images/herdr-factory-status.png)](docs/images/herdr-factory-status.png)
