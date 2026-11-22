@@ -4,7 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -21,6 +22,32 @@ def checksum(path):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def checkpoint_member(checkpoint, name):
+    """Keep archive reads beneath their root without following internal symlinks."""
+    if not isinstance(name, str) or not name or "\\" in name:
+        raise ValueError("checkpoint_invalid")
+    relative = PurePosixPath(name)
+    if relative.is_absolute() or ".." in relative.parts or str(relative) != name or name == ".":
+        raise ValueError("checkpoint_invalid")
+    path = Path(checkpoint).resolve()
+    for part in relative.parts:
+        path /= part
+        if path.is_symlink():
+            raise ValueError("checkpoint_invalid")
+    return path
+
+
+def verified_code_manifest(checkpoint):
+    manifest = json.loads(checkpoint_member(checkpoint, "manifest.json").read_text())
+    if (manifest.get("schema_version") != 1 or manifest.get("verified") is not True
+            or manifest.get("scope") != "committed_code"
+            or not isinstance(manifest.get("base_revision"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", manifest["base_revision"])
+            or checksum(checkpoint_member(checkpoint, "code.bundle")) != manifest.get("bundle_sha256")):
+        raise ValueError("checkpoint_not_verified")
+    return manifest
 
 
 def sqlite_checkpoint(source, destination):
@@ -82,10 +109,10 @@ def code_checkpoint(repo, backup_root, base_branch="main"):
 
 
 def restore_code_into(checkpoint, destination):
+    if Path(destination).is_symlink():
+        raise ValueError("restore_destination_exists")
     checkpoint, destination = Path(checkpoint).resolve(), Path(destination).resolve()
-    manifest = json.loads((checkpoint / "manifest.json").read_text())
-    if not manifest.get("verified") or checksum(checkpoint / "code.bundle") != manifest["bundle_sha256"]:
-        raise ValueError("checkpoint_not_verified")
+    manifest = verified_code_manifest(checkpoint)
     if destination.exists():
         raise ValueError("restore_destination_exists")
     result = command(["git", "clone", str(checkpoint / "code.bundle"), str(destination)], timeout=300)

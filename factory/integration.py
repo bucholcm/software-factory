@@ -7,7 +7,7 @@ import time
 
 from .adapters import is_documentation_change
 from .config import command, git, write_json
-from .recovery import code_checkpoint
+from .recovery import code_checkpoint, checkpoint_member, verified_code_manifest
 from .scope import verify_paths
 from .security import verified as security_verified
 
@@ -52,6 +52,10 @@ def integrate_ready(supervisor, config):
             if (previous.get("revision") == job["revision"]
                     and previous.get("stage") in {"checkpoint_ready", "integrated"}
                     and git(repo, "rev-parse", config["base_branch"]) == job["revision"]):
+                checkpoint = checkpoint_member(Path(config["state_dir"]) / "backups", previous["checkpoint_id"])
+                manifest = verified_code_manifest(checkpoint)
+                if manifest["base_revision"] != previous["base_revision"]:
+                    raise RuntimeError("integration_checkpoint_mismatch")
                 previous["stage"] = "integrated"
                 write_json(journal_path, previous)
                 supervisor.store.update(job["id"], stage="integrated", blocker="")
