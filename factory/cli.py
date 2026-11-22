@@ -25,7 +25,7 @@ from .worker import process_identity, process_matches
 
 def public_jobs(jobs):
     fields = ("id", "task_id", "runtime", "stage", "attempt", "pid", "branch", "worktree", "revision", "reviewed_revision",
-              "review_result", "tests_passed", "blocker", "updated_at")
+              "review_result", "tests_passed", "blocker", "updated_at", "created_at", "started_at", "next_run", "fix_count")
     values = [{key: job[key] for key in fields} for job in jobs]
     for value, job in zip(values, jobs):
         from .worker import sanitize_result
@@ -54,7 +54,16 @@ def status(config):
             value["status"] = "running" if value.get("ready", True) else "starting"
     except (OSError, ValueError, TypeError):
         value = {"status": "stopped"}
-    value["jobs"] = public_jobs(Store(config["state_dir"]).jobs())
+    store = Store(config["state_dir"])
+    jobs = store.jobs()
+    value["jobs"] = public_jobs(jobs)
+    from .progress import project, timelines, summary
+    timeline = timelines(store)
+    now = time.time()
+    for public, job in zip(value["jobs"], jobs):
+        live = bool(job.get("pid") and process_matches(job["pid"], job.get("process_identity", "")))
+        public["progress"] = project(job, value, timeline.get(job["id"], {}), now=now, worker_alive=live)
+    value["activity"] = summary(value["jobs"])
     value.setdefault("task_policy", config.get("task_policy", "documentation_only"))
     value.setdefault("integration_policy", config["integration_policy"])
     value["activation_policy"] = "explicit_release_command"

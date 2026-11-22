@@ -67,6 +67,16 @@ active workers, recent jobs, and blockers. Ctrl+C closes the view while the
 supervisor continues running. Use `--once` for a single snapshot or `--plain`
 for output without terminal colors.
 
+While a verified worker is alive, the panel shows **WORK IN PROGRESS**, the
+current stage, the running attempt's elapsed time, total age including waits,
+and verified implementation/test/review milestones for the current revision.
+Fixes invalidate the affected milestones and show a new verification cycle.
+Retry waits, blocked work, stale supervisors and reviewed branches have distinct
+states. A coordinator can be idle between polls while its worker is running.
+Use `--interval 1` for a timer that refreshes every second. The same read-only
+progress projection is available in `factory status` JSON. Token usage is
+currently marked as not collected; model/token/cost telemetry is separate work.
+
 To open it beside the current pane in Herdr:
 
 ```sh
