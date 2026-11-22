@@ -108,7 +108,8 @@ class Store:
                 fields[key] = json.dumps(fields[key], sort_keys=True)
         assignments = ",".join(f"{name}=?" for name in fields)
         with self.connect() as db:
-            changed = db.execute(f"UPDATE jobs SET {assignments} WHERE id=?", (*fields.values(), job_id)).rowcount
+            # Identifiers are restricted by FIELDS above; every value is bound.
+            changed = db.execute(f"UPDATE jobs SET {assignments} WHERE id=?", (*fields.values(), job_id)).rowcount  # nosec B608
             if not changed:
                 raise KeyError("unknown_job")
         return self.get(job_id)

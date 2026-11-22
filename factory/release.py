@@ -23,7 +23,7 @@ import uuid
 
 from .adapters import runtime_environment
 from .config import command, git, write_json
-from .recovery import checksum, code_checkpoint, restore_code_into, sqlite_checkpoint
+from .recovery import checksum, code_checkpoint, restore_code_into, sqlite_checkpoint, checkpoint_member
 
 
 def _schema(path):
@@ -116,37 +116,37 @@ def create_checkpoint(repo, backup_root, inventory, base_branch="main", *, quies
 
 def _manifest(checkpoint):
     checkpoint = Path(checkpoint).resolve()
-    value = json.loads((checkpoint / "manifest.json").read_text())
+    value = json.loads(checkpoint_member(checkpoint, "manifest.json").read_text())
     if value.get("schema_version") != 1 or value.get("verified") is not True or checkpoint.name.startswith("."):
         raise ValueError("checkpoint_not_verified")
     return value
 
 
 def _restore(checkpoint, destination, manifest):
+    if Path(destination).is_symlink():
+        raise ValueError("restore_destination_exists")
     checkpoint, destination = Path(checkpoint).resolve(), Path(destination).resolve()
     if destination.exists():
         raise ValueError("restore_destination_exists")
-    code = Path(manifest["code"])
-    if code.is_absolute() or ".." in code.parts or (checkpoint / code).is_symlink():
-        raise ValueError("checkpoint_invalid")
+    code = checkpoint_member(checkpoint, manifest["code"])
     names = set()
     for item in manifest["inventory"]:
         name = item["name"]
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", name) or name in names:
             raise ValueError("checkpoint_invalid")
         names.add(name)
-        path = checkpoint / "state" / name
-        if path.is_symlink() or checksum(path) != item["sha256"]:
+        path = checkpoint_member(checkpoint, "state/" + name)
+        if item.get("kind") not in {"file", "sqlite"} or checksum(path) != item["sha256"]:
             raise ValueError("checkpoint_not_verified")
         if item["kind"] == "sqlite" and _schema(path) != item["schema"]:
             raise ValueError("checkpoint_not_verified")
     destination.mkdir(parents=True, mode=0o700)
     try:
-        result = restore_code_into(checkpoint / code, destination / "code")
+        result = restore_code_into(code, destination / "code")
         state = destination / "state"
         state.mkdir(mode=0o700)
         for item in manifest["inventory"]:
-            source, target = checkpoint / "state" / item["name"], state / item["name"]
+            source, target = checkpoint_member(checkpoint, "state/" + item["name"]), state / item["name"]
             _copy_file(source, target)
             if checksum(target) != item["sha256"]:
                 raise ValueError("checkpoint_not_verified")

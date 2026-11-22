@@ -10,6 +10,16 @@ Turn project tickets into isolated implementations, tested changes, and
 independent reviews. Start from Codex or OpenCode and follow progress in a
 terminal pane.
 
+The focus is recoverable local delivery: resume owned work after a supervisor
+restart, bind tests and independent review to a commit, and verify a checkpoint
+before integration. Application activation and data recovery have separate,
+explicit boundaries.
+
+This is a pilot for trusted local projects. Test and release commands run with
+the supervisor account's permissions. Review the [security policy](SECURITY.md)
+before running a project, and the [public-release assessment](security_best_practices_report.md)
+before publishing or deploying it.
+
 The supervisor runs independently of chat sessions. Herdr shows agent terminals
 and status; Codex CLI executes bounded jobs and independent review sessions.
 OpenCode has a read-only planning/review adapter; its implementation sandbox is

@@ -40,9 +40,12 @@ def safe_changed_paths(repo):
 
 def documentation_path(name):
     path = Path(name)
-    return (not path.is_absolute() and ".." not in path.parts and name.endswith(".md")
+    ordinary = name in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "SUPPORT.md", "CODE_OF_CONDUCT.md"} or name.startswith("docs/")
+    return (ordinary and not path.is_absolute() and ".." not in path.parts and name.endswith(".md")
             and path.name not in {"AGENTS.md", "CLAUDE.md", "SKILL.md"}
-            and not any(part in {".agents", ".codex", ".opencode", ".github", "skills"} for part in path.parts))
+            and not any(part in {".agents", ".codex", ".opencode", ".github", ".claude", ".cursor",
+                                 ".windsurf", "skills", "agents", "commands", "command", "prompts", "rules"}
+                        for part in path.parts))
 
 
 def is_documentation_change(repo, base):

@@ -3,14 +3,16 @@ from pathlib import Path, PurePosixPath
 
 
 def safe_path(name):
-    if not isinstance(name, str) or not name or "\\" in name or "\x00" in name:
+    if not isinstance(name, str) or not name or "\\" in name or any(ord(c) < 32 or ord(c) == 127 for c in name):
         return False
     path = PurePosixPath(name)
     return (not path.is_absolute() and str(path) == name and name != "."
             and ".." not in path.parts
             and not any(part.startswith(".env") or part in {
-                ".git", ".beads", ".dolt", ".buchos", ".venv", "node_modules", "__pycache__"
+                ".git", ".beads", ".dolt", ".buchos", ".venv", "node_modules", "__pycache__",
+                ".ssh", ".aws", ".gnupg", ".kube"
             } for part in path.parts)
+            and path.name not in {".netrc", ".npmrc", ".pypirc", ".git-credentials", "id_rsa", "id_ed25519"}
             and path.suffix.lower() not in {".sqlite3", ".sqlite", ".db", ".pem", ".key", ".pyc"})
 
 

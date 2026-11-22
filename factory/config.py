@@ -9,6 +9,9 @@ import tempfile
 
 
 def command(argv, cwd=None, timeout=60):
+    if argv and argv[0] == "git":
+        # Factory-owned Git operations must not execute repository hooks on the host.
+        argv = ["git", "-c", "core.hooksPath=" + os.devnull, *argv[1:]]
     return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
 
 
