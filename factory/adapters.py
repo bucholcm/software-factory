@@ -167,14 +167,25 @@ def _agent(job, config, result_path):
         finally:
             raw_path.unlink(missing_ok=True)
     else:
-        # OpenCode's planning agent is read-only. Implementation remains disabled
-        # until this installation has a verified sandbox profile.
-        if not review:
+        # OpenCode has no OS-level sandbox comparable to Codex `--sandbox`.
+        # Implementation stays disabled until the operator verifies the profile
+        # with scripts/verify_opencode_sandbox.py and sets
+        # opencode_implementation_sandbox to "verified" in the config. After
+        # that, the deterministic verify_paths check, the independent review
+        # stage and the configured gates remain the scope enforcement.
+        if not review and config.get("opencode_implementation_sandbox") != "verified":
             raise RuntimeError("opencode_implementation_sandbox_unconfigured")
         requested_model = config.get('opencode_model')
         collector = Collector(job, runtime, result_path.parent / 'usage.json', config, requested_model)
-        argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
-                prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
+        if review:
+            argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
+                    prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
+        else:
+            # Non-interactive implementation: --auto approves only permissions
+            # that are not explicitly denied, and --archived keeps scripted
+            # factory sessions out of the operator's session lists.
+            argv = [config["opencode_executable"], "run", "--auto", "--agent", "build", "--format", "json",
+                    "--archived", prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
         if requested_model:
             argv[2:2] = ['--model', requested_model]
         try:
