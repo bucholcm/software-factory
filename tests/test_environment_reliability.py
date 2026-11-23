@@ -46,7 +46,7 @@ class EnvironmentTests(unittest.TestCase):
         self.config['codex_executable'] = 'codex'
         attempt = self.root / 'attempt'
         attempt.mkdir()
-        with patch('factory.adapters.subprocess.run') as model:
+        with patch('factory.adapters.run_agent') as model:
             with self.assertRaisesRegex(ExecutionFailure, 'environment_executable_missing'):
                 _agent(self.job, self.config, attempt / 'result.json')
             model.assert_not_called()
@@ -179,17 +179,17 @@ class EnvironmentTests(unittest.TestCase):
         attempt = self.root / 'attempt'
         attempt.mkdir()
         config = {'codex_executable': 'codex'}
-        with patch('factory.adapters.subprocess.run', return_value=subprocess.CompletedProcess([], 12)):
+        with patch('factory.adapters.run_agent', return_value=subprocess.CompletedProcess([], 12)):
             with self.assertRaisesRegex(ExecutionFailure, 'agent_process_failed') as found:
                 _agent(self.job, config, attempt / 'result.json')
             self.assertEqual(12, found.exception.diagnostic['exit_code'])
-        with patch('factory.adapters.subprocess.run', return_value=subprocess.CompletedProcess([], 0)):
+        with patch('factory.adapters.run_agent', return_value=subprocess.CompletedProcess([], 0)):
             with self.assertRaisesRegex(ExecutionFailure, 'agent_result_missing'):
                 _agent(self.job, config, attempt / 'result.json')
         def failed(*args, **kwargs):
             (attempt / 'native-result.json').write_text(json.dumps({'status': 'failed', 'question': 'synthetic-private'}))
             return subprocess.CompletedProcess([], 0)
-        with patch('factory.adapters.subprocess.run', side_effect=failed):
+        with patch('factory.adapters.run_agent', side_effect=failed):
             _agent(self.job, config, attempt / 'result.json')
         self.assertEqual({'status': 'failed', 'blocker': 'agent_reported_failure'}, json.loads((attempt / 'result.json').read_text()))
         self.assertFalse((attempt / 'native-result.json').exists())

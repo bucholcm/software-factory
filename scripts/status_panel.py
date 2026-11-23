@@ -6,6 +6,7 @@ does not submit tasks or display requirements, agent output or application data.
 """
 import argparse
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 import sys
 import time
@@ -22,6 +23,39 @@ def duration(seconds):
     hours, rest = divmod(seconds, 3600)
     minutes, seconds = divmod(rest, 60)
     return f"{hours}h {minutes:02d}m {seconds:02d}s" if hours else f"{minutes:02d}m {seconds:02d}s"
+
+
+def usage_lines(usage):
+    if not usage:
+        return ['  Tokens: not collected']
+    coverage = usage.get('coverage', 'not_recorded')
+    count = usage.get('total_tokens')
+    if count is None:
+        count = usage.get('known_total_tokens')
+    tokens = f'{count:,}' if count is not None else 'unavailable'
+    estimate = usage.get('estimated_cost', {})
+    amounts = []
+    for row in estimate.get('currencies', []):
+        value = row.get('amount', row.get('known_amount'))
+        if value is not None:
+            amounts.append(f"{format(Decimal(value), '.4g')} {row['currency']}")
+    cost = ' + '.join(amounts) if amounts else 'unknown'
+    assumed = '; assumed model' if estimate.get('assumed_models') else ''
+    lines = [f"  Tokens: {tokens} ({coverage}) | Est: {cost} ({estimate.get('status', 'unpriced')}{assumed})"]
+    models = usage.get('models', [])
+    if models:
+        reported = [item['reported_session_model'] for item in models if item.get('reported_session_model')]
+        requested = [item['requested_model'] for item in models if item.get('requested_model')]
+        if reported:
+            name = ', '.join(sorted({item['provider'] + '/' + item['model'] for item in reported}))
+            lines += ['  Session model: ' + name[:44] + ('…' if len(name) > 44 else '') + ' (runtime selection)']
+        else:
+            lines += ['  Observed model: unavailable' + (' | Requested: ' + ', '.join(sorted(set(requested)))[:30] if requested else '')]
+    runtime = usage.get('runtime_reported_cost')
+    if runtime:
+        value = runtime.get('amount', runtime.get('known_amount'))
+        lines += [f"  Runtime cost: {format(Decimal(value), '.4g')} {runtime['currency']} ({runtime['coverage']}; not invoice)"]
+    return lines
 
 
 def combine(projects):
@@ -103,7 +137,7 @@ def render(snapshot, project, *, color=False, now=None):
                       f"  Fix cycles: {progress.get('fix_cycles', 0)} | Attempts started: {progress.get('attempts_started', 0)}"]
         if progress.get("retry_in_seconds") is not None:
             lines += [f"  Retry in: {duration(progress['retry_in_seconds'])}"]
-        lines += ["  Tokens: not collected", ""]
+        lines += usage_lines(job.get('usage')) + ['']
         if job.get("blocker"):
             lines += [tint("  Blocker: " + job["blocker"], "33"), ""]
         if progress.get("activity", "").startswith("orphaned_worker"):

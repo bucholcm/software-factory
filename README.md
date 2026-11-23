@@ -74,8 +74,11 @@ Fixes invalidate the affected milestones and show a new verification cycle.
 Retry waits, blocked work, stale supervisors and reviewed branches have distinct
 states. A coordinator can be idle between polls while its worker is running.
 Use `--interval 1` for a timer that refreshes every second. The same read-only
-progress projection is available in `factory status` JSON. Token usage is
-currently marked as not collected; model/token/cost telemetry is separate work.
+progress projection is available in `factory status` JSON. New model attempts
+record runtime token usage and show known totals/coverage in the panel, alongside
+explicit API-equivalent cost estimates. Model provenance, missing historical
+data and partial costs remain visible; see the [usage and cost guide](docs/usage-and-costs.md).
+Use `$factory usage [ID]` or `/factory usage [ID]` for the read-only report.
 Repeat `--config` to show an application factory and its repair supervisor in
 one view. Active work is shown first, followed by waiting or blocked jobs; the
 panel keeps four jobs visible while JSON status includes the full history.

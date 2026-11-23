@@ -15,6 +15,13 @@ nie zmienia runtime'u wykonawcy fabryki.
 `board` zamiast `graph` wybiera tablicę. Są to prośby o widok, nie identyfikatory
 ticketów do przekazania wykonawcy.
 Dla tych argumentów przejdź bezpośrednio do sekcji „Board i graf Scotty”.
+`$factory usage [ID]` / `/factory usage [ID]` pokazuje wyłącznie raport modeli,
+tokenów i kosztów. Użyj `scripts/project.py --project KATALOG --action usage`,
+opcjonalnie `--task ID`; `--related` dołącza skonfigurowane źródła napraw.
+Nie przekazuj `usage` jako ticketu, nie uruchamiaj supervisora ani konfiguracji
+projektu dla samego raportu. Nieznane metryki lub koszty nie oznaczają zera.
+Koszt raportowany przez runtime i estymata API nie są fakturą; zachowaj źródło,
+wersję cennika i jawne założenia. Nie wnioskuj faktycznego modelu z żądanego.
 Nie inicjalizuj konfiguracji fabryki ani supervisora dla samego widoku.
 Bez argumentu sprawdź konfigurację i status; nie wybieraj sam ticketu.
 Nie zakładaj, że `/factory` jest obsługiwane przez każdy klient Codexa.

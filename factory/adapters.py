@@ -14,6 +14,7 @@ from .config import command, git, load, write_json
 from .scope import verify_paths
 from .security import policy as security_policy, receipt_path
 from .environment import ExecutionFailure, prepare
+from .usage import Collector, opencode_session_model, run_agent
 
 
 SCHEMA = {
@@ -139,13 +140,16 @@ def _agent(job, config, result_path):
     env = prepare(job, config, result_path.parent, env)
     runtime = config.get("review_runtime", job["runtime"]) if review else job["runtime"]
     if runtime == "codex":
-        argv = [config["codex_executable"], "exec", "--ephemeral", "--sandbox",
+        requested_model = config.get("codex_model")
+        collector = Collector(job, runtime, result_path.parent / 'usage.json', config, requested_model)
+        argv = [config["codex_executable"], "exec", "--ephemeral", "--json", "--sandbox",
                 "read-only" if review else "workspace-write", "-c", 'approval_policy="never"',
                 "--output-schema", str(schema_path), "--output-last-message", str(raw_path), "-"]
+        if requested_model:
+            argv[2:2] = ['--model', requested_model]
         try:
-            run = subprocess.run(argv, cwd=job["worktree"], input=prompt, text=True, env=env,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 timeout=config.get("agent_timeout_seconds", 900))
+            run = run_agent(argv, cwd=job["worktree"], prompt=prompt, env=env, collector=collector,
+                            timeout=config.get("agent_timeout_seconds", 900))
             if run.returncode:
                 raise ExecutionFailure("agent_process_failed", phase="agent", exit_code=run.returncode)
             if not raw_path.exists():
@@ -167,27 +171,24 @@ def _agent(job, config, result_path):
         # until this installation has a verified sandbox profile.
         if not review:
             raise RuntimeError("opencode_implementation_sandbox_unconfigured")
+        requested_model = config.get('opencode_model')
+        collector = Collector(job, runtime, result_path.parent / 'usage.json', config, requested_model)
         argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
                 prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
+        if requested_model:
+            argv[2:2] = ['--model', requested_model]
         try:
-            run = subprocess.run(argv, cwd=job["worktree"], text=True, env=env, capture_output=True,
-                                 timeout=config.get("agent_timeout_seconds", 900))
+            run = run_agent(argv, cwd=job["worktree"], prompt='', env=env, collector=collector,
+                            timeout=config.get("agent_timeout_seconds", 900))
         except FileNotFoundError:
             raise ExecutionFailure("agent_executable_missing", phase="agent") from None
         except subprocess.TimeoutExpired:
             raise ExecutionFailure("agent_timeout", phase="agent") from None
+        opencode_session_model(collector, config['opencode_executable'], job['worktree'], env)
         if run.returncode:
             raise ExecutionFailure("agent_process_failed", phase="agent", exit_code=run.returncode)
-        texts = []
-        for line in run.stdout.splitlines():
-            try:
-                item = json.loads(line)
-                if item.get("type") == "text":
-                    texts.append(item.get("part", {}).get("text", ""))
-            except ValueError:
-                continue
         try:
-            response = json.loads("".join(texts).strip().removeprefix("```json").removesuffix("```").strip())
+            response = json.loads(run.stdout.strip().removeprefix("```json").removesuffix("```").strip())
         except ValueError:
             raise ExecutionFailure("agent_result_invalid", phase="agent") from None
     if not isinstance(response, dict) or response.get("status") not in {"completed", "blocked", "failed"}:

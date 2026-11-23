@@ -1,0 +1,29 @@
+{
+  "version": "openai-2026-11-23-standard-short",
+  "rates": [
+    {
+      "provider": "openai",
+      "model": "gpt-6.2-sol",
+      "currency": "USD",
+      "unit_tokens": 1000000,
+      "input_per_unit": "2.00",
+      "cached_input_per_unit": "0.10",
+      "cache_write_per_unit": null,
+      "output_per_unit": "10.00",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "effective_date": "2026-11-23"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.2-astra",
+      "currency": "USD",
+      "unit_tokens": 1000000,
+      "input_per_unit": "8.00",
+      "cached_input_per_unit": "0.40",
+      "cache_write_per_unit": null,
+      "output_per_unit": "40.00",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "effective_date": "2026-11-23"
+    }
+  ]
+}

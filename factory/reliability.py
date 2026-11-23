@@ -204,6 +204,7 @@ def dispatch(config):
                           acceptance="A synthetic regression reproduces the incident and passes with the fix. "
                           "Full factory checks and independent exact-revision review pass. "
                           "Deliver a reviewed branch; installation remains a separate controlled rollout.",
-                          allowed_paths=allowed)
+                          allowed_paths=allowed,
+                          origin={'incident_signature': item['signature'], 'project_key': item['project_key']})
             return {"status": "repair_dispatched", "job_id": job["id"], "task_id": task_id}
     return {"status": "no_new_repair_work"}
