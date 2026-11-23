@@ -124,6 +124,44 @@ def _prompt(job):
     return "\n".join(lines)
 
 
+def _extract_agent_json(text):
+    """Codex enforces --output-schema; OpenCode has no such enforcement, so a
+    model may answer with prose around the JSON or wrap it in a code fence.
+    Extract the JSON object tolerantly: strict field validation follows, so
+    only this extraction step may be forgiving."""
+    candidate = (text or "").strip()
+    if not candidate:
+        raise ValueError("agent_json_not_found")
+    if candidate.startswith("```"):
+        stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", candidate)
+        stripped = stripped.removesuffix("```").strip()
+        try:
+            return json.loads(stripped)
+        except ValueError:
+            pass
+    for block in reversed(re.findall(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.DOTALL)):
+        try:
+            return json.loads(block)
+        except ValueError:
+            continue
+    depth = 0
+    start = -1
+    for index, char in enumerate(candidate):
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}":
+            if depth:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    try:
+                        return json.loads(candidate[start:index + 1])
+                    except ValueError:
+                        start = -1
+    raise ValueError("agent_json_not_found")
+
+
 def _agent(job, config, result_path):
     review = job["stage"] == "reviewing"
     raw_path = result_path.parent / "native-result.json"
@@ -199,7 +237,7 @@ def _agent(job, config, result_path):
         if run.returncode:
             raise ExecutionFailure("agent_process_failed", phase="agent", exit_code=run.returncode)
         try:
-            response = json.loads(run.stdout.strip().removeprefix("```json").removesuffix("```").strip())
+            response = _extract_agent_json(run.stdout)
         except ValueError:
             raise ExecutionFailure("agent_result_invalid", phase="agent") from None
     if not isinstance(response, dict) or response.get("status") not in {"completed", "blocked", "failed"}:

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from factory.adapters import _agent
+from factory.adapters import _agent, _extract_agent_json
 from factory.config import load
 
 
@@ -147,6 +147,22 @@ class OpenCodeImplementationTests(unittest.TestCase):
             "opencode_implementation_sandbox": "verified",
         }))
         self.assertEqual(load(good).get("opencode_implementation_sandbox"), "verified")
+
+    def test_opencode_prose_and_fence_answers_are_extracted(self):
+        payload = '{"status": "completed", "summary": "synthetic", "review_result": "not_applicable"}'
+        shapes = {
+            "clean": payload,
+            "fenced": "```json\n" + payload + "\n```",
+            "prose_then_fence": "Short status line first.```json\n" + payload + "\n```",
+            "prose_then_inline": "Done, appended the line. " + payload,
+        }
+        for label, text in shapes.items():
+            with self.subTest(label=label):
+                self.assertEqual(_extract_agent_json(text), json.loads(payload))
+        with self.assertRaises(ValueError):
+            _extract_agent_json("no json here at all")
+        with self.assertRaises(ValueError):
+            _extract_agent_json("")
 
 
 if __name__ == "__main__":
