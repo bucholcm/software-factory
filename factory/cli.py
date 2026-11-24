@@ -66,6 +66,16 @@ def status(config):
                           and process_identity(job["pid"]) is None and group_exists(job["pid"]))
         public["progress"] = project(job, value, timeline.get(job["id"], {}), now=now, worker_alive=live, group_alive=group_live)
     value["activity"] = summary(value["jobs"])
+    from .usage_report import project_report
+    usage = project_report(config['state_dir'])
+    summaries = {item['job_id']: item['summary'] for item in usage['jobs']}
+    value['usage'] = usage['summary']
+    for public in value['jobs']:
+        if public['id'] in summaries:
+            public['usage'] = summaries[public['id']]
+            public['progress']['tokens'] = public['usage']['total_tokens']
+            public['progress']['known_tokens'] = public['usage']['known_total_tokens']
+            public['progress']['token_status'] = public['usage']['coverage']
     value.setdefault("task_policy", config.get("task_policy", "documentation_only"))
     value.setdefault("integration_policy", config["integration_policy"])
     value["activation_policy"] = "explicit_release_command"
@@ -81,10 +91,14 @@ def status(config):
     return value
 
 
-def enqueue(config, task_id, requirements, runtime=None, acceptance="", allowed_paths=None):
+def enqueue(config, task_id, requirements, runtime=None, acceptance="", allowed_paths=None, origin=None):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", task_id):
         raise ValueError("invalid_task_id")
     store = Store(config["state_dir"])
+    if origin is not None and (not isinstance(origin, dict) or set(origin) != {'incident_signature', 'project_key'}
+                               or not re.fullmatch(r'[0-9a-f]{64}', origin.get('incident_signature', ''))
+                               or not re.fullmatch(r'[0-9a-f]{16}', origin.get('project_key', ''))):
+        raise ValueError('invalid_job_origin')
     for job in store.jobs():
         if job["task_id"] == task_id:
             return job
@@ -104,12 +118,14 @@ def enqueue(config, task_id, requirements, runtime=None, acceptance="", allowed_
                 raise RuntimeError("isolated_worktree_failed")
         elif git(worktree, "rev-parse", "HEAD") != base or git(worktree, "status", "--porcelain"):
             raise RuntimeError("existing_worktree_needs_reconciliation")
-        return store.enqueue(task_id, worktree, branch, runtime or config["runtime"],
-                             payload={"requirements": requirements, "acceptance": acceptance,
+        payload = {"requirements": requirements, "acceptance": acceptance,
                                       "base_revision": base,
                                       "allowed_paths": allowed_paths or [],
                                       "question_path": str(Path(config["state_dir"]) / "questions" / (task_id + ".json")),
-                                      "findings_path": str(Path(config["state_dir"]) / "findings" / (task_id + ".json"))})
+                   "findings_path": str(Path(config["state_dir"]) / "findings" / (task_id + ".json"))}
+        if origin is not None:
+            payload['origin'] = dict(origin)
+        return store.enqueue(task_id, worktree, branch, runtime or config['runtime'], payload=payload)
 
 
 def run(config_path):
@@ -224,6 +240,12 @@ def main():
     submit.add_argument("--project", required=True, type=Path)
     check = sub.add_parser("status")
     check.add_argument("--watch", action="store_true")
+    usage = sub.add_parser('usage')
+    usage.add_argument('--job', help='Task ID or factory job ID')
+    usage.add_argument('--related', action='store_true', help='Include configured reliability source state directories')
+    usage.add_argument('--reprice-catalog', type=Path, help='Add a separate estimate using this explicit catalog; never overwrite historical estimates')
+    usage.add_argument('--assume-model', action='append', default=[], metavar='RUNTIME=PROVIDER/MODEL',
+                       help='Explicit model assumption for the separate recalculation; never relabel observed models')
     task = sub.add_parser("enqueue")
     task.add_argument("--task", required=True)
     task.add_argument("--requirements-file", type=Path, required=True)
@@ -304,6 +326,24 @@ def main():
             if not args.watch:
                 break
             time.sleep(5)
+    elif args.action == 'usage':
+        from .usage_report import report
+        from .pricing import freeze_catalog
+        catalog = None
+        if args.reprice_catalog:
+            catalog = freeze_catalog({'usage_pricing': json.loads(args.reprice_catalog.read_text())})
+        assumptions = None
+        if args.assume_model:
+            from .pricing import estimate_cost
+            assumptions = {}
+            for value in args.assume_model:
+                match = re.fullmatch(r'(codex|opencode)=([^/]+)/(.+)', value)
+                if not match or match[1] in assumptions:
+                    raise ValueError('invalid_reprice_model_assumption')
+                assumption = {'provider': match[2], 'model': match[3]}
+                estimate_cost([], None, assumption)
+                assumptions[match[1]] = assumption
+        print(json.dumps(report(config, args.job, args.related, catalog, assumptions), sort_keys=True, indent=2))
     elif args.action == "enqueue":
         job = enqueue(config, args.task, args.requirements_file.read_text(), args.runtime, args.acceptance, args.allowed_path)
         print(json.dumps(public_jobs([job])[0], sort_keys=True))

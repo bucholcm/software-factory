@@ -56,8 +56,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, default=Path.cwd())
     parser.add_argument("--config", type=Path)
-    parser.add_argument("--action", choices=["inspect", "status", "submit", "run", "set-mode"], default="inspect")
+    parser.add_argument("--action", choices=["inspect", "status", "usage", "submit", "run", "set-mode"], default="inspect")
     parser.add_argument("--task")
+    parser.add_argument("--related", action="store_true")
     parser.add_argument("--mode", choices=["documentation", "source-review", "source-integrate"])
     args = parser.parse_args()
     try:
@@ -77,6 +78,11 @@ def main():
             if not args.mode:
                 parser.error("set-mode requires --mode")
             argv += [args.mode]
+        if args.action == "usage":
+            if args.task:
+                argv += ['--job', args.task]
+            if args.related:
+                argv += ['--related']
         sys.exit(subprocess.run(argv, cwd=resolved["factory_root"]).returncode)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(json.dumps({"status": "error", "error": str(error)}))

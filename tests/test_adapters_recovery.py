@@ -95,11 +95,11 @@ class RecoveryTests(unittest.TestCase):
         attempt = self.root / "attempt"
         attempt.mkdir()
         result = attempt / "outcome.json"
-        job = {"task_id": "test", "stage": "implementing", "runtime": "codex", "worktree": str(self.repo), "payload": {}}
+        job = {"id": "test-job", "task_id": "test", "stage": "implementing", "runtime": "codex", "worktree": str(self.repo), "payload": {}}
         def failure(*args, **kwargs):
             (attempt / "native-result.json").write_text("synthetic-private-response")
             return subprocess.CompletedProcess(args[0], 1)
-        with patch("factory.adapters.subprocess.run", side_effect=failure):
+        with patch("factory.adapters.run_agent", side_effect=failure):
             with self.assertRaisesRegex(RuntimeError, "agent_process_failed"):
                 _agent(job, {"codex_executable": "codex"}, result)
         self.assertFalse((attempt / "native-result.json").exists())

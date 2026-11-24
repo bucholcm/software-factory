@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -66,4 +67,18 @@ def load(path):
     interval = config.get("reliability_interval_seconds", 60)
     if type(interval) not in {int, float} or not 30 <= interval <= 86400:
         raise ValueError("invalid_reliability_interval")
+    from .pricing import freeze_catalog, estimate_cost
+    freeze_catalog(config)
+    assumptions = config.get('usage_price_assumptions', {})
+    if not isinstance(assumptions, dict) or set(assumptions) - {'codex', 'opencode'}:
+        raise ValueError('invalid_usage_price_assumptions')
+    for assumption in assumptions.values():
+        if not isinstance(assumption, dict) or set(assumption) != {'provider', 'model'}:
+            raise ValueError('invalid_usage_price_assumptions')
+        estimate_cost([], None, assumption)
+    for field in ('codex_model', 'opencode_model'):
+        value = config.get(field)
+        if value is not None and (not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:+/-]{0,159}', value)
+                                  or value.startswith(('sk-', 'ghp_', 'github_pat_')) or '..' in value.split('/')):
+            raise ValueError('invalid_runtime_model')
     return config
