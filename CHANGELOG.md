@@ -16,7 +16,9 @@
   former `verified` flag. The legacy canary probe can no longer enable it.
   OpenCode can submit factory work to a Codex executor; planning review remains
   available. An enforced native OpenCode implementation sandbox is future work.
-- Align Python package metadata with the release version.
+- Make the reused-PID regression independent of retry dispatch timing.
+- Align Python package metadata with the release version and include this
+  changelog in the source distribution.
 
 Runtime module contents match the independently reviewed `20ce10f` deployed to
 both local services. New token collection applies to future attempts; previous

@@ -393,13 +393,23 @@ class SupervisorTests(unittest.TestCase):
         job = self.enqueue(supervisor)
         attempt_dir = self.state / "jobs" / job["id"] / "reused"
         attempt_dir.mkdir(parents=True)
-        supervisor.store.update(job["id"], attempt=1, attempt_dir=str(attempt_dir),
-                                pid=os.getpid(), process_identity="0" * 64, started_at=time.time() - 10)
-        supervisor.tick()
+        job = supervisor.store.update(job["id"], attempt=1, attempt_dir=str(attempt_dir),
+                                      pid=os.getpid(), process_identity="0" * 64, started_at=time.time() - 10)
+        # Reconcile the stale identity without tick's later scheduling pass:
+        # retry backoff may expire during SQLite writes and allow a valid new
+        # worker to launch, which clears the transient blocker under test.
+        with patch("factory.supervisor.os.kill") as signal_pid, patch(
+            "factory.supervisor.os.killpg"
+        ) as signal_group:
+            supervisor._reconcile(job)
+        signal_pid.assert_not_called()
+        self.assertTrue(all(call.args[1] == 0 for call in signal_group.call_args_list))
         updated = supervisor.store.get(job["id"])
         self.assertNotEqual(identity, updated["process_identity"])
         self.assertTrue(process_matches(os.getpid(), identity))
         self.assertIn(updated["blocker"], {"worker_lost", "orphaned_process_group"})
+        self.assertEqual({}, supervisor._children)
+        self.assertEqual(1, updated["attempt"])
 
     def test_result_redaction(self):
         result = sanitize_result({"status": "blocked", "blocker": "private value with spaces",
