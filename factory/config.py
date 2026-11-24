@@ -49,6 +49,10 @@ def load(path):
         config[field] = str(Path(config[field]).expanduser().resolve())
     if config.get("runtime") not in {"codex", "opencode"}:
         raise ValueError("invalid_runtime")
+    if config.get("opencode_sandbox") not in {None, "seatbelt"}:
+        # Selects the enforced macOS Seatbelt boundary shipped in
+        # factory/sandbox; verified by scripts/verify_opencode_enforcement.py.
+        raise ValueError("invalid_opencode_sandbox")
     if config.get("opencode_implementation_sandbox") is not None:
         # Legacy verified flags did not establish an enforced sandbox.
         raise ValueError("invalid_opencode_implementation_sandbox")

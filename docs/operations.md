@@ -129,11 +129,32 @@ OpenCode can use the same skill through its `~/.agents/skills` compatibility
 discovery. To add `/factory TICKET` and `/factory status`, link
 `integrations/opencode/commands/factory.md` into
 `~/.config/opencode/commands/factory.md`, then reload OpenCode configuration.
+
+### OpenCode implementation
+
 The command uses the current project and the same supervisor; it does not change
-the configured execution runtime. `/factory TICKET` in OpenCode can submit work
-to a factory configured with the Codex execution runtime. OpenCode's native
-implementation runtime stays disabled until an enforced sandbox is implemented
-and validated with negative access tests. The former
+the configured execution runtime. `/factory TICKET` in OpenCode submits work to
+the configured runtime. To use OpenCode for implementation on macOS, set these
+keys in that project's factory config:
+
+```json
+{
+  "runtime": "opencode",
+  "opencode_sandbox": "seatbelt"
+}
+```
+
+The factory runs `opencode --standalone run --auto --agent build` inside the
+shipped Seatbelt profile. It confines writes to the task worktree, attempt
+scratch space, OpenCode state and system temp; network access is limited to
+model traffic and local communication. OpenCode implementation is currently
+supported on macOS only. Before enabling it, run
+`python scripts/verify_opencode_enforcement.py`. Both the operating-system
+negative access checks and a live adversarial model run must pass. The live
+probe uses an isolated temporary canary directory and may incur model charges.
+Set `review_runtime` separately if you want a different implementation and
+review runtime. OpenCode's `plan` review adapter is a planning mode, not an OS
+sandbox. The former
 `opencode_implementation_sandbox: "verified"` flag is rejected: a successful
 cooperative edit and an untouched canary do not establish containment. The legacy
 `scripts/verify_opencode_sandbox.py` command now exits unsuccessfully without
@@ -161,7 +182,8 @@ records retain requested models separately from runtime-reported identity;
 see the [model provenance and cost guide](usage-and-costs.md).
 
 OpenCode review uses its `plan` agent. It is a planning mode, not an OS sandbox.
-Native OpenCode implementation remains disabled pending an enforced sandbox.
+For implementation, set `runtime` to `opencode` and `opencode_sandbox` to
+`seatbelt` as described above; this runtime is supported on macOS.
 
 `scripts/install_local.py` installs a reviewed `main` revision to a separate
 durable directory, optional isolated scanner tools, and a per-user macOS

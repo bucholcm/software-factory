@@ -40,14 +40,15 @@ API-equivalent estimates support spending decisions; automated budget limits are
 
 ## Codex and OpenCode, one workflow
 
-Configure implementation and review runtimes independently. Use Codex for
-implementation and OpenCode for planning review, with requested models selected
-per runtime. Start the same workflow from either coding client.
+Configure implementation and review runtimes independently. Run Codex
+implementation with OpenCode review, OpenCode implementation with Codex review,
+or both stages on one runtime. OpenCode implementation requires macOS Seatbelt.
+Select requested models per runtime and start from either coding client.
 
 | Runtime adapter | Implementation | Review |
 | --- | --- | --- |
 | Codex | Available | Independent exact-commit review |
-| OpenCode | Disabled pending an enforced sandbox | Planning review |
+| OpenCode | macOS only · Seatbelt required | Planning review |
 
 [Configure runtimes and models →](docs/operations.md#runtime-and-model-selection)
 
@@ -71,7 +72,11 @@ Decisions block their dependent tasks. Independent scoped work can continue.
 
 ## Start here
 
-Python 3.11+, Git, authenticated Codex CLI, Beads and GitHub CLI are required.
+Python 3.11+, Git, Beads, GitHub CLI and an authenticated CLI for the selected
+runtime (Codex or OpenCode) are required.
+Codex and OpenCode can execute implementation jobs. OpenCode implementation is
+currently supported on macOS inside the factory's enforced Seatbelt sandbox.
+See the [OpenCode setup](docs/operations.md#opencode-implementation) before enabling it.
 
 | Guide | What you will find |
 | --- | --- |
