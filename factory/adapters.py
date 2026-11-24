@@ -162,12 +162,42 @@ def _extract_agent_json(text):
     raise ValueError("agent_json_not_found")
 
 
+def _seatbelt_opencode_argv(job, result_path, core_argv):
+    """Wrap a self-contained OpenCode run in the macOS Seatbelt profile that
+    ships with the factory. The profile confines writes to the job worktree,
+    the attempt scratch directory, OpenCode's own state and the system temp;
+    network is limited to HTTPS and DNS. Callers pass --standalone so the
+    sandboxed process tree performs all work instead of delegating to the
+    background service. All parameter paths must be fully resolved: symlinks
+    such as /tmp -> /private/tmp break subpath matching."""
+    profile = Path(__file__).resolve().parent / "sandbox" / "opencode-macos.sb"
+    if not profile.is_file():
+        raise RuntimeError("opencode_sandbox_profile_missing")
+    scratch = Path(result_path).parent / "agent-scratch"
+    scratch.mkdir(mode=0o700, exist_ok=True)
+    home = Path.home().resolve()
+    temp_dir = Path(os.environ.get("TMPDIR", "/tmp")).resolve()
+    params = [
+        f"worktree={Path(job['worktree']).resolve()}",
+        f"scratch={scratch.resolve()}",
+        f"opencode-data={(home / '.local/share/opencode').resolve()}",
+        f"opencode-cache={(home / '.cache/opencode').resolve()}",
+        f"opencode-config={(home / '.config/opencode').resolve()}",
+        f"temp={temp_dir}",
+    ]
+    argv = ["sandbox-exec"]
+    for pair in params:
+        argv += ["-D", pair]
+    return argv + ["-f", str(profile.resolve()), *core_argv]
+
+
 def _agent(job, config, result_path):
     review = job["stage"] == "reviewing"
     runtime = config.get("review_runtime", job["runtime"]) if review else job["runtime"]
-    # No installed enforced OpenCode implementation boundary exists. A legacy
+    # OpenCode implementation requires the enforced Seatbelt boundary that
+    # ships with the factory (opencode_sandbox: "seatbelt"). A legacy
     # "verified" flag or a cooperative canary probe cannot provide one.
-    if runtime == "opencode" and not review:
+    if runtime == "opencode" and not review and config.get("opencode_sandbox") != "seatbelt":
         raise RuntimeError("opencode_implementation_sandbox_unconfigured")
     raw_path = result_path.parent / "native-result.json"
     schema_path = result_path.parent / "schema.json"
@@ -211,10 +241,21 @@ def _agent(job, config, result_path):
     else:
         requested_model = config.get('opencode_model')
         collector = Collector(job, runtime, result_path.parent / 'usage.json', config, requested_model)
-        argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
-                prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
+        core = [config["opencode_executable"]]
+        if review:
+            core += ["run", "--agent", "plan", "--format", "json"]
+        else:
+            # Self-contained implementation run: --standalone bypasses the
+            # background service so the Seatbelt-wrapped process tree does
+            # all the work; --auto approves only permissions that are not
+            # explicitly denied; --archived keeps scripted factory sessions
+            # out of the operator's session lists.
+            core += ["--standalone", "run", "--auto", "--agent", "build", "--format", "json", "--archived"]
+        run_index = core.index("run")
         if requested_model:
-            argv[2:2] = ['--model', requested_model]
+            core[run_index + 1:run_index + 1] = ["--model", requested_model]
+        core.append(prompt + "\nResponse schema: " + json.dumps(SCHEMA))
+        argv = core if review else _seatbelt_opencode_argv(job, result_path, core)
         try:
             run = run_agent(argv, cwd=job["worktree"], prompt='', env=env, collector=collector,
                             timeout=config.get("agent_timeout_seconds", 900))

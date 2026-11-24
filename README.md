@@ -46,9 +46,11 @@ Decisions block their dependent tasks. Independent scoped work can continue.
 
 ## Start here
 
-Python 3.11+, Git, authenticated Codex CLI, Beads and GitHub CLI are required.
-Codex executes implementation jobs. OpenCode can submit tickets and run planning
-reviews; its native implementation runtime remains disabled pending an enforced sandbox.
+Python 3.11+, Git, Beads, GitHub CLI and an authenticated CLI for the selected
+runtime (Codex or OpenCode) are required.
+Codex and OpenCode can execute implementation jobs. OpenCode implementation is
+currently supported on macOS inside the factory's enforced Seatbelt sandbox.
+See the [OpenCode setup](docs/operations.md#opencode-implementation) before enabling it.
 
 | Guide | What you will find |
 | --- | --- |
