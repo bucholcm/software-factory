@@ -173,8 +173,17 @@ discovery. To add `/factory TICKET` and `/factory status`, link
 `integrations/opencode/commands/factory.md` into
 `~/.config/opencode/commands/factory.md`, then reload OpenCode configuration.
 The command uses the current project and the same supervisor; it does not change
-the configured execution runtime. OpenCode implementation workers remain
-disabled until a verified sandbox profile is configured.
+the configured execution runtime. OpenCode implementation jobs stay disabled
+until the operator runs `scripts/verify_opencode_sandbox.py` against a scratch
+repository and sets `opencode_implementation_sandbox` to `"verified"` in the
+project config. The probe drives one real `opencode run --auto --agent build`
+session through the factory adapter and checks that the edit lands in the
+allowed path while an outside canary file stays untouched. Unlike Codex,
+OpenCode has no OS-level sandbox: the deterministic allowed-paths verification,
+the independent review stage and the configured gates remain the enforcement
+boundary, and the operator accepts that residual trust difference by setting
+the flag. Implementation jobs may also pin a model with `opencode_model`;
+review jobs keep the read-only `plan` agent.
 
 `scripts/install_local.py` installs a reviewed `main` revision to a separate
 durable directory, optional isolated scanner tools, and a per-user macOS
