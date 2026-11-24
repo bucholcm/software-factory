@@ -162,6 +162,29 @@ launching an agent. OpenCode review jobs retain the `plan` agent and can pin a
 requested model using `opencode_model`; this is a planning mode, not an OS sandbox.
 
 
+
+### Runtime and model selection
+
+Choose the implementation executor and reviewer separately in the private
+project configuration. For example, Codex can implement while OpenCode reviews:
+
+```json
+{
+  "runtime": "codex",
+  "review_runtime": "opencode"
+}
+```
+
+Omitting `review_runtime` uses the job's runtime for review. Configure both CLI
+executables and their authentication before mixing runtimes. `codex_model` and
+`opencode_model` optionally select requested model IDs for each adapter. Usage
+records retain requested models separately from runtime-reported identity;
+see the [model provenance and cost guide](usage-and-costs.md).
+
+OpenCode review uses its `plan` agent. It is a planning mode, not an OS sandbox.
+For implementation, set `runtime` to `opencode` and `opencode_sandbox` to
+`seatbelt` as described above; this runtime is supported on macOS.
+
 `scripts/install_local.py` installs a reviewed `main` revision to a separate
 durable directory, optional isolated scanner tools, and a per-user macOS
 LaunchAgent. Without `--start` it prepares a candidate service definition;

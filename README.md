@@ -2,7 +2,8 @@
 
 **From a ticket to a reviewed commit.**
 
-Run coding agents locally with tests, independent review and recovery after restarts.
+Run feature tickets through local agents, tests and independent review.
+Track tokens and estimated cost by ticket, runtime and model.
 
 [![Release](https://img.shields.io/github/v/release/bucholcm/software-factory)](https://github.com/bucholcm/software-factory/releases/latest)
 [![Tests](https://github.com/bucholcm/software-factory/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/bucholcm/software-factory/actions/workflows/tests.yml)
@@ -20,11 +21,36 @@ OpenCode    /factory PROJECT-TICKET
 
 [Set up your project →](docs/operations.md#run-and-inspect) · [Latest release](https://github.com/bucholcm/software-factory/releases/latest)
 
-## Keep the work moving
+## Know what each feature costs
 
-| Resume after a restart | Verify the commit | See what is happening |
+[![Conceptual feature-cost report: each ticket contains implementation and review attempts, with runtime and model provenance, token usage, cache usage and versioned price estimates. Retries are included and missing data remains unknown.](docs/images/feature-costs.svg)](docs/usage-and-costs.md)
+
+Inspect each feature ticket's token usage and estimated cost across stages,
+models and retries. Estimates require a versioned rate catalog and either a known
+model identity or an explicit model assumption. Codex does not report observed model identity;
+requested models stay separate. Missing data stays unknown.
+
+```text
+Codex       $factory usage PROJECT-TICKET
+OpenCode    /factory usage PROJECT-TICKET
+```
+
+[Explore costs and model provenance →](docs/usage-and-costs.md)
+API-equivalent estimates support spending decisions; automated budget limits are not implemented.
+
+## Codex and OpenCode, one workflow
+
+Configure implementation and review runtimes independently. Run Codex
+implementation with OpenCode review, OpenCode implementation with Codex review,
+or both stages on one runtime. OpenCode implementation requires macOS Seatbelt.
+Select requested models per runtime and start from either coding client.
+
+| Runtime adapter | Implementation | Review |
 | --- | --- | --- |
-| The supervisor adopts its existing worker and keeps completion receipts. | Tests and independent review belong to an exact revision. Fixes trigger fresh checks. | Follow stages, elapsed time, blockers and reported tokens in your terminal. |
+| Codex | Available | Independent exact-commit review |
+| OpenCode | macOS only · Seatbelt required | Planning review |
+
+[Configure runtimes and models →](docs/operations.md#runtime-and-model-selection)
 
 ## Follow delivery in Herdr
 

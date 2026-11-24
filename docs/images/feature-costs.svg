@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="324" viewBox="0 0 1200 324" role="img" aria-labelledby="title description">
+  <title id="title">Feature costs with runtime and model provenance</title>
+  <desc id="description">Conceptual report structure, not live billing data. One feature ticket includes implementation and review attempts. Each attempt records the runtime, requested and reported model identity, tokens and cache usage. Optional API-equivalent price estimates require versioned rates and a known or explicitly assumed model. Retries count and missing values stay unknown.</desc>
+  <rect width="1200" height="324" rx="20" fill="#0d1117"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="38" y="42" fill="#7ee7b5" font-size="14" font-weight="700" letter-spacing="2">COST VISIBILITY / PER FEATURE / PER MODEL</text>
+    <text x="38" y="87" fill="#f0f6fc" font-size="30" font-weight="700">One ticket. Every attempt accounted for.</text>
+    <g fill="#161d27" stroke="#303b4b">
+      <rect x="38" y="116" width="334" height="138" rx="12"/>
+      <rect x="408" y="116" width="754" height="138" rx="12"/>
+    </g>
+    <text x="58" y="145" fill="#8b949e" font-size="12" font-weight="700" letter-spacing="1.2">FEATURE TICKET</text>
+    <text x="58" y="180" fill="#79c0ff" font-size="18" font-weight="700">Implementation / Codex</text>
+    <text x="58" y="214" fill="#d2a8ff" font-size="18" font-weight="700">Review / Codex or OpenCode</text>
+    <path d="M379 185 H400 M394 179 L400 185 L394 191" fill="none" stroke="#738397" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="430" y="145" fill="#8b949e" font-size="12" font-weight="700" letter-spacing="1.2">PER ATTEMPT</text>
+    <path d="M663 160 V232 M917 160 V232" stroke="#303b4b"/>
+    <g fill="#f0f6fc" font-size="20" font-weight="700">
+      <text x="430" y="181">Runtime + model</text>
+      <text x="685" y="181">Tokens + cache</text>
+      <text x="939" y="181">Cost estimate</text>
+    </g>
+    <g fill="#b1bac4" font-size="14">
+      <text x="430" y="210">Requested and reported</text>
+      <text x="430" y="231">identity kept separate</text>
+      <text x="685" y="210">Known usage with</text>
+      <text x="685" y="231">explicit coverage</text>
+      <text x="939" y="210">Versioned rates +</text>
+      <text x="939" y="231">known / assumed model</text>
+    </g>
+    <g fill="#b1bac4" font-size="15">
+      <circle cx="45" cy="290" r="4" fill="#7ee7b5"/><text x="61" y="295">Retries included</text>
+      <circle cx="451" cy="290" r="4" fill="#79c0ff"/><text x="467" y="295">Estimates retain their source</text>
+      <circle cx="904" cy="290" r="4" fill="#d2a8ff"/><text x="920" y="295">Unknown stays unknown</text>
+    </g>
+  </g>
+</svg>
