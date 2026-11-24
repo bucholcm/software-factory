@@ -26,8 +26,8 @@ OpenCode    /factory PROJECT-TICKET
 [![Conceptual feature-cost report: each ticket contains implementation and review attempts, with runtime and model provenance, token usage, cache usage and versioned price estimates. Retries are included and missing data remains unknown.](docs/images/feature-costs.svg)](docs/usage-and-costs.md)
 
 Inspect each feature ticket's token usage and estimated cost across stages,
-models and retries. Model-specific estimates require known identity and rates,
-or an explicit pricing assumption. Codex does not report observed model identity;
+models and retries. Estimates require a versioned rate catalog and either a known
+model identity or an explicit model assumption. Codex does not report observed model identity;
 requested models stay separate. Missing data stays unknown.
 
 ```text

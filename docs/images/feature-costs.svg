@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="324" viewBox="0 0 1200 324" role="img" aria-labelledby="title description">
   <title id="title">Feature costs with runtime and model provenance</title>
-  <desc id="description">Conceptual report structure, not live billing data. One feature ticket includes implementation and review attempts. Each attempt records the runtime, requested and reported model identity, tokens and cache usage. Optional versioned rates or explicit model assumptions provide API-equivalent price estimates. Retries count and missing values stay unknown.</desc>
+  <desc id="description">Conceptual report structure, not live billing data. One feature ticket includes implementation and review attempts. Each attempt records the runtime, requested and reported model identity, tokens and cache usage. Optional API-equivalent price estimates require versioned rates and a known or explicitly assumed model. Retries count and missing values stay unknown.</desc>
   <rect width="1200" height="324" rx="20" fill="#0d1117"/>
   <g font-family="Arial, Helvetica, sans-serif">
     <text x="38" y="42" fill="#7ee7b5" font-size="14" font-weight="700" letter-spacing="2">COST VISIBILITY / PER FEATURE / PER MODEL</text>
@@ -25,8 +25,8 @@
       <text x="430" y="231">identity kept separate</text>
       <text x="685" y="210">Known usage with</text>
       <text x="685" y="231">explicit coverage</text>
-      <text x="939" y="210">Versioned rates or</text>
-      <text x="939" y="231">an explicit assumption</text>
+      <text x="939" y="210">Versioned rates +</text>
+      <text x="939" y="231">known / assumed model</text>
     </g>
     <g fill="#b1bac4" font-size="15">
       <circle cx="45" cy="290" r="4" fill="#7ee7b5"/><text x="61" y="295">Retries included</text>
