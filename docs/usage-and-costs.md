@@ -1,5 +1,10 @@
 # Runtime usage and cost diagnostics
 
+Feature cost is measured per tracked ticket. Inspect its attempt records for
+runtime/model provenance, tokens and price estimates; the job summary includes
+all its recorded implementation, review and fix attempts. Project summaries
+aggregate tickets without counting retries twice.
+
 Each new model attempt produces a private `usage.json` beside its existing
 worker receipts. The collector reads bounded JSONL frames from stdout, drains
 stderr, and retains only counters, owned session metadata, timestamps, coverage
