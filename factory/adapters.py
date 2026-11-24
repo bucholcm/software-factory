@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 from .config import command, git, load, write_json
@@ -176,7 +177,7 @@ def _seatbelt_opencode_argv(job, result_path, core_argv):
     scratch = Path(result_path).parent / "agent-scratch"
     scratch.mkdir(mode=0o700, exist_ok=True)
     home = Path.home().resolve()
-    temp_dir = Path(os.environ.get("TMPDIR", "/tmp")).resolve()
+    temp_dir = Path(tempfile.gettempdir()).resolve()
     params = [
         f"worktree={Path(job['worktree']).resolve()}",
         f"scratch={scratch.resolve()}",
