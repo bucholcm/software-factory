@@ -173,17 +173,16 @@ discovery. To add `/factory TICKET` and `/factory status`, link
 `integrations/opencode/commands/factory.md` into
 `~/.config/opencode/commands/factory.md`, then reload OpenCode configuration.
 The command uses the current project and the same supervisor; it does not change
-the configured execution runtime. OpenCode implementation jobs stay disabled
-until the operator runs `scripts/verify_opencode_sandbox.py` against a scratch
-repository and sets `opencode_implementation_sandbox` to `"verified"` in the
-project config. The probe drives one real `opencode run --auto --agent build`
-session through the factory adapter and checks that the edit lands in the
-allowed path while an outside canary file stays untouched. Unlike Codex,
-OpenCode has no OS-level sandbox: the deterministic allowed-paths verification,
-the independent review stage and the configured gates remain the enforcement
-boundary, and the operator accepts that residual trust difference by setting
-the flag. Implementation jobs may also pin a model with `opencode_model`;
-review jobs keep the read-only `plan` agent.
+the configured execution runtime. `/factory TICKET` in OpenCode can submit work
+to a factory configured with the Codex execution runtime. OpenCode's native
+implementation runtime stays disabled until an enforced sandbox is implemented
+and validated with negative access tests. The former
+`opencode_implementation_sandbox: "verified"` flag is rejected: a successful
+cooperative edit and an untouched canary do not establish containment. The legacy
+`scripts/verify_opencode_sandbox.py` command now exits unsuccessfully without
+launching an agent. OpenCode review jobs retain the `plan` agent and can pin a
+requested model using `opencode_model`; this is a planning mode, not an OS sandbox.
+
 
 `scripts/install_local.py` installs a reviewed `main` revision to a separate
 durable directory, optional isolated scanner tools, and a per-user macOS

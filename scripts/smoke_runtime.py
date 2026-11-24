@@ -11,6 +11,7 @@ from factory.cli import enqueue
 from factory.config import load, write_json
 from factory.integration import integrate_ready
 from factory.supervisor import Supervisor
+from factory.usage_report import project_report
 
 
 def main():
@@ -72,7 +73,15 @@ def main():
                     previous = current["stage"]
                 if current["stage"] == "integrated":
                     assert (repo / ("calculator.py" if options.source else "docs/probe.md")).is_file()
-                    print(json.dumps({"status": "passed", "reviewed_revision": current["reviewed_revision"], "checkpoint_count": len(list((root / "state/backups").iterdir()))}), flush=True)
+                    usage = project_report(config["state_dir"])["summary"]
+                    assert usage["coverage"] == "complete", "runtime_usage_incomplete"
+                    assert usage["recorded_attempts"] >= 2 and usage["missing_attempts"] == 0, "runtime_usage_missing"
+                    assert type(usage["total_tokens"]) is int and usage["total_tokens"] > 0, "runtime_usage_tokens_missing"
+                    # A fresh reader after completion must not increment usage.
+                    assert project_report(config["state_dir"])["summary"] == usage, "runtime_usage_replay_changed"
+                    print(json.dumps({"status": "passed", "reviewed_revision": current["reviewed_revision"],
+                                      "checkpoint_count": len(list((root / "state/backups").iterdir())),
+                                      "usage": usage}), flush=True)
                     return
                 if current["stage"] in {"blocked", "failed"}:
                     raise RuntimeError("smoke_pipeline_" + current["blocker"])

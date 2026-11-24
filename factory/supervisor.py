@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -268,8 +269,21 @@ class Supervisor:
             return True
         completion = self._read_json(attempt_dir / "completion.json")
         if completion:
-            if (not identity or completion.get("pid") != identity.get("pid")
-                    or completion.get("identity") != identity.get("identity")):
+            # The wrapper publishes identity before completion. It can publish
+            # both after our first identity read and exit before launch lookup;
+            # bind completion to the now-durable receipt, not that stale read.
+            durable_identity = self._read_json(attempt_dir / "identity.json")
+
+            def binding(value):
+                if (isinstance(value, dict) and type(value.get("pid")) is int and value["pid"] > 0
+                        and isinstance(value.get("identity"), str)
+                        and re.fullmatch(r"[0-9a-f]{64}", value["identity"])):
+                    return value["pid"], value["identity"]
+                return None
+
+            durable_binding = binding(durable_identity)
+            if (durable_binding is None or binding(completion) != durable_binding
+                    or (identity is not None and binding(identity) != durable_binding)):
                 self._block(job, "invalid_worker_completion")
                 return False
             self._finish(job, completion.get("result"))

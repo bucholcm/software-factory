@@ -130,40 +130,45 @@ def _extract_agent_json(text):
     Extract the JSON object tolerantly: strict field validation follows, so
     only this extraction step may be forgiving."""
     candidate = (text or "").strip()
-    if not candidate:
+    if not candidate or len(candidate.encode()) > 65536:
         raise ValueError("agent_json_not_found")
-    if candidate.startswith("```"):
-        stripped = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", candidate)
-        stripped = stripped.removesuffix("```").strip()
-        try:
-            return json.loads(stripped)
-        except ValueError:
-            pass
+    try:
+        value = json.loads(candidate)
+        if isinstance(value, dict):
+            return value
+    except ValueError:
+        pass
     for block in reversed(re.findall(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.DOTALL)):
         try:
-            return json.loads(block)
+            value = json.loads(block)
+            if isinstance(value, dict):
+                return value
         except ValueError:
             continue
-    depth = 0
-    start = -1
+    decoder = json.JSONDecoder()
+    candidates = 0
     for index, char in enumerate(candidate):
-        if char == "{":
-            if depth == 0:
-                start = index
-            depth += 1
-        elif char == "}":
-            if depth:
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    try:
-                        return json.loads(candidate[start:index + 1])
-                    except ValueError:
-                        start = -1
+        if char != "{":
+            continue
+        candidates += 1
+        if candidates > 256:
+            break
+        try:
+            value, _ = decoder.raw_decode(candidate, index)
+            if isinstance(value, dict):
+                return value
+        except ValueError:
+            continue
     raise ValueError("agent_json_not_found")
 
 
 def _agent(job, config, result_path):
     review = job["stage"] == "reviewing"
+    runtime = config.get("review_runtime", job["runtime"]) if review else job["runtime"]
+    # No installed enforced OpenCode implementation boundary exists. A legacy
+    # "verified" flag or a cooperative canary probe cannot provide one.
+    if runtime == "opencode" and not review:
+        raise RuntimeError("opencode_implementation_sandbox_unconfigured")
     raw_path = result_path.parent / "native-result.json"
     schema_path = result_path.parent / "schema.json"
     write_json(schema_path, SCHEMA)
@@ -176,7 +181,6 @@ def _agent(job, config, result_path):
             prompt += "\nSafe gate failure context: " + json.dumps(sanitize_result(job["outcome"]).get("diagnostic", {}))
     env = runtime_environment()
     env = prepare(job, config, result_path.parent, env)
-    runtime = config.get("review_runtime", job["runtime"]) if review else job["runtime"]
     if runtime == "codex":
         requested_model = config.get("codex_model")
         collector = Collector(job, runtime, result_path.parent / 'usage.json', config, requested_model)
@@ -205,25 +209,10 @@ def _agent(job, config, result_path):
         finally:
             raw_path.unlink(missing_ok=True)
     else:
-        # OpenCode has no OS-level sandbox comparable to Codex `--sandbox`.
-        # Implementation stays disabled until the operator verifies the profile
-        # with scripts/verify_opencode_sandbox.py and sets
-        # opencode_implementation_sandbox to "verified" in the config. After
-        # that, the deterministic verify_paths check, the independent review
-        # stage and the configured gates remain the scope enforcement.
-        if not review and config.get("opencode_implementation_sandbox") != "verified":
-            raise RuntimeError("opencode_implementation_sandbox_unconfigured")
         requested_model = config.get('opencode_model')
         collector = Collector(job, runtime, result_path.parent / 'usage.json', config, requested_model)
-        if review:
-            argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
-                    prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
-        else:
-            # Non-interactive implementation: --auto approves only permissions
-            # that are not explicitly denied, and --archived keeps scripted
-            # factory sessions out of the operator's session lists.
-            argv = [config["opencode_executable"], "run", "--auto", "--agent", "build", "--format", "json",
-                    "--archived", prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
+        argv = [config["opencode_executable"], "run", "--agent", "plan", "--format", "json",
+                prompt + "\nResponse schema: " + json.dumps(SCHEMA)]
         if requested_model:
             argv[2:2] = ['--model', requested_model]
         try:

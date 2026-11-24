@@ -49,8 +49,8 @@ def load(path):
         config[field] = str(Path(config[field]).expanduser().resolve())
     if config.get("runtime") not in {"codex", "opencode"}:
         raise ValueError("invalid_runtime")
-    if config.get("opencode_implementation_sandbox") not in {None, "verified"}:
-        # Set only after scripts/verify_opencode_sandbox.py passes; see README.
+    if config.get("opencode_implementation_sandbox") is not None:
+        # Legacy verified flags did not establish an enforced sandbox.
         raise ValueError("invalid_opencode_implementation_sandbox")
     config.setdefault("task_policy", "documentation_only")
     if config["task_policy"] not in {"documentation_only", "source"}:
