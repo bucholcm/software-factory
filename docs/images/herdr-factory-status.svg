@@ -10,7 +10,9 @@
 <text x="54" y="288" fill="#80dfb1" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="400">● Codex</text>
 <text x="74" y="318" fill="#a3b4cc" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">implementation</text>
 <text x="54" y="364" fill="#80dfb1" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="400">● OpenCode</text>
-<text x="74" y="394" fill="#a3b4cc" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">planning / review</text>
+<text x="74" y="394" fill="#a3b4cc" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">implementation</text>
+<text x="74" y="414" fill="#a3b4cc" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">macOS · Seatbelt</text>
+<text x="74" y="434" fill="#a3b4cc" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">planning / review</text>
 <text x="54" y="466" fill="#839bb9" font-family="Menlo,Consolas,monospace" font-size="14" font-weight="700">TERMINALS</text>
 <text x="54" y="506" fill="#76cfc9" font-family="Menlo,Consolas,monospace" font-size="18" font-weight="400">factory-status</text>
 <text x="54" y="548" fill="#dce7f5" font-family="Menlo,Consolas,monospace" font-size="18" font-weight="400">delivery / chat</text>
@@ -42,8 +44,8 @@
 <text x="1056" y="199" fill="#f0f5fc" font-family="Menlo,Consolas,monospace" font-size="20" font-weight="700">Start from your project</text>
 <text x="1056" y="242" fill="#63d9cf" font-family="Menlo,Consolas,monospace" font-size="19" font-weight="400">Codex     $factory demo-a11.2</text>
 <text x="1056" y="277" fill="#63d9cf" font-family="Menlo,Consolas,monospace" font-size="19" font-weight="400">OpenCode  /factory demo-a11.2</text>
-<text x="1056" y="329" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">OpenCode implementation sandbox is not configured</text>
-<text x="1056" y="355" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">in this pilot; it supports planning and review.</text>
+<text x="1056" y="329" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">OpenCode can implement inside macOS Seatbelt</text>
+<text x="1056" y="355" fill="#9aaac0" font-family="Menlo,Consolas,monospace" font-size="16" font-weight="400">Set runtime=opencode + opencode_sandbox=seatbelt</text>
 <path d="M1056 390 H1742" stroke="#2a3b52"/>
 <text x="1056" y="434" fill="#f0f5fc" font-family="Menlo,Consolas,monospace" font-size="22" font-weight="700">Example completion report</text>
 <text x="1056" y="482" fill="#7ba8ff" font-family="Menlo,Consolas,monospace" font-size="17" font-weight="400">demo-a11.2 · Add preview validation</text>

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="324" viewBox="0 0 1200 324" role="img" aria-labelledby="title description">
   <title id="title">Feature costs with runtime and model provenance</title>
-  <desc id="description">Conceptual report structure, not live billing data. One feature ticket includes implementation and review attempts. Each attempt records the runtime, requested and reported model identity, tokens and cache usage. Optional API-equivalent price estimates require versioned rates and a known or explicitly assumed model. Retries count and missing values stay unknown.</desc>
+  <desc id="description">Conceptual report structure, not live billing data. One feature ticket includes implementation and review attempts using Codex or OpenCode. OpenCode implementation requires macOS Seatbelt. Each attempt records the runtime, requested and reported model identity, tokens and cache usage. Optional API-equivalent price estimates require versioned rates and a known or explicitly assumed model. Retries count and missing values stay unknown.</desc>
   <rect width="1200" height="324" rx="20" fill="#0d1117"/>
   <g font-family="Arial, Helvetica, sans-serif">
     <text x="38" y="42" fill="#7ee7b5" font-size="14" font-weight="700" letter-spacing="2">COST VISIBILITY / PER FEATURE / PER MODEL</text>
@@ -10,8 +10,9 @@
       <rect x="408" y="116" width="754" height="138" rx="12"/>
     </g>
     <text x="58" y="145" fill="#8b949e" font-size="12" font-weight="700" letter-spacing="1.2">FEATURE TICKET</text>
-    <text x="58" y="180" fill="#79c0ff" font-size="18" font-weight="700">Implementation / Codex</text>
-    <text x="58" y="214" fill="#d2a8ff" font-size="18" font-weight="700">Review / Codex or OpenCode</text>
+    <text x="58" y="180" fill="#79c0ff" font-size="16" font-weight="700">Implementation / Codex or OpenCode</text>
+    <text x="58" y="214" fill="#d2a8ff" font-size="16" font-weight="700">Review / Codex or OpenCode</text>
+    <text x="58" y="239" fill="#b1bac4" font-size="12">OpenCode implementation requires macOS Seatbelt</text>
     <path d="M379 185 H400 M394 179 L400 185 L394 191" fill="none" stroke="#738397" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <text x="430" y="145" fill="#8b949e" font-size="12" font-weight="700" letter-spacing="1.2">PER ATTEMPT</text>
     <path d="M663 160 V232 M917 160 V232" stroke="#303b4b"/>
