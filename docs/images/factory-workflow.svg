@@ -44,7 +44,7 @@
       <circle cx="45" cy="398" r="4" fill="#7ee7b5"/>
       <text x="61" y="403">Resume after restarts</text>
       <circle cx="451" cy="398" r="4" fill="#79c0ff"/>
-      <text x="467" y="403">Elapsed time + token coverage</text>
+      <text x="467" y="403">Feature + model cost estimates</text>
       <circle cx="904" cy="398" r="4" fill="#d2a8ff"/>
       <text x="920" y="403">Controlled integration</text>
     </g>
