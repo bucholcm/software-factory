@@ -215,6 +215,90 @@ class SupervisorTests(unittest.TestCase):
         self.assertFalse(scheduled["attempt_dir"])
         self.wait(supervisor, job["id"], "ready")
 
+    def test_completion_publication_between_identity_reads_advances_exactly_once(self):
+        supervisor = self.supervisor()
+        job = self.enqueue(supervisor)
+        attempt_dir = self.state / "jobs" / job["id"] / "implementing-1-100"
+        attempt_dir.mkdir(parents=True)
+        job = supervisor.store.update(job["id"], attempt=1, attempt_dir=str(attempt_dir),
+                                      started_at=time.time() - 1)
+        receipt = {"pid": 123456, "identity": "a" * 64}
+
+        def publish_after_identity_read(spec_path):
+            self.assertEqual(attempt_dir / "spec.json", spec_path)
+            atomic_json(attempt_dir / "identity.json", receipt)
+            atomic_json(attempt_dir / "completion.json", dict(receipt, result=result_for(job)))
+            return None  # The wrapper exited before process discovery.
+
+        with patch.object(supervisor, "_find_launch", side_effect=publish_after_identity_read), patch.object(
+            supervisor, "_launch"
+        ) as launch:
+            supervisor.tick()
+            advanced = supervisor.store.get(job["id"])
+            self.assertEqual("testing", advanced["stage"])
+            self.assertEqual(REVISION, advanced["revision"])
+            self.assertEqual("", advanced["blocker"])
+            self.assertEqual("", advanced["attempt_dir"])
+            supervisor.tick()
+            with supervisor.store.connect() as db:
+                advances = db.execute("SELECT count(*) FROM events WHERE job_id=? AND code='stage_advanced'",
+                                      (job["id"],)).fetchone()[0]
+                starts = db.execute("SELECT count(*) FROM events WHERE job_id=? AND code='worker_started'",
+                                    (job["id"],)).fetchone()[0]
+            self.assertEqual(1, advances)
+            self.assertEqual(0, starts)
+            self.assertTrue(all(call.args[0]["stage"] == "testing" for call in launch.call_args_list))
+
+    def test_completion_requires_exact_durable_identity_after_publication(self):
+        for forged in ({"pid": 654321, "identity": "a" * 64},
+                       {"pid": 123456, "identity": "b" * 64},
+                       {"pid": True, "identity": "a" * 64},
+                       {"pid": 123456, "identity": "not-a-process-identity"}):
+            with self.subTest(forged=forged):
+                supervisor = self.supervisor()
+                job = self.enqueue(supervisor, "forged-" + str(len(self.supervisors)))
+                attempt_dir = self.state / "jobs" / job["id"] / "implementing-1-100"
+                attempt_dir.mkdir(parents=True)
+                job = supervisor.store.update(job["id"], attempt=1, attempt_dir=str(attempt_dir),
+                                              started_at=time.time() - 1)
+
+                def publish(spec_path):
+                    atomic_json(attempt_dir / "identity.json", {"pid": 123456, "identity": "a" * 64})
+                    atomic_json(attempt_dir / "completion.json", dict(forged, result=result_for(job)))
+                    return None
+
+                with patch.object(supervisor, "_find_launch", side_effect=publish), patch.object(
+                    supervisor, "_launch"
+                ) as launch:
+                    supervisor.tick()
+                    updated = supervisor.store.get(job["id"])
+                    self.assertEqual("blocked", updated["stage"])
+                    self.assertEqual("invalid_worker_completion", updated["blocker"])
+                    self.assertEqual("", updated["revision"])
+                    supervisor.tick()
+                    launch.assert_not_called()
+                supervisor.close()
+
+    def test_completion_cannot_replace_an_already_observed_identity(self):
+        supervisor = self.supervisor()
+        job = self.enqueue(supervisor)
+        attempt_dir = self.state / "jobs" / job["id"] / "implementing-1-100"
+        attempt_dir.mkdir(parents=True)
+        job = supervisor.store.update(job["id"], attempt=1, attempt_dir=str(attempt_dir),
+                                      started_at=time.time() - 1)
+        original = {"pid": 123456, "identity": "a" * 64}
+        replacement = {"pid": 123456, "identity": "b" * 64}
+        with patch.object(supervisor, "_read_json", side_effect=[
+            original, dict(replacement, result=result_for(job)), replacement
+        ]), patch("factory.supervisor.process_matches", return_value=False), patch(
+            "factory.supervisor.group_exists", return_value=False
+        ):
+            self.assertFalse(supervisor._reconcile(job))
+        updated = supervisor.store.get(job["id"])
+        self.assertEqual("blocked", updated["stage"])
+        self.assertEqual("invalid_worker_completion", updated["blocker"])
+        self.assertEqual("", updated["revision"])
+
     def test_command_failure_retries_bounded_without_logging_output(self):
         counter = self.root / "attempts"
         supervisor = self.supervisor(lambda j, p: command_for({"status": "completed"}, p, counter=counter, exit_code=4))
