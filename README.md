@@ -174,14 +174,26 @@ discovery. To add `/factory TICKET` and `/factory status`, link
 `~/.config/opencode/commands/factory.md`, then reload OpenCode configuration.
 The command uses the current project and the same supervisor; it does not change
 the configured execution runtime. `/factory TICKET` in OpenCode can submit work
-to a factory configured with the Codex execution runtime. OpenCode's native
-implementation runtime stays disabled until an enforced sandbox is implemented
-and validated with negative access tests. The former
-`opencode_implementation_sandbox: "verified"` flag is rejected: a successful
-cooperative edit and an untouched canary do not establish containment. The legacy
-`scripts/verify_opencode_sandbox.py` command now exits unsuccessfully without
-launching an agent. OpenCode review jobs retain the `plan` agent and can pin a
-requested model using `opencode_model`; this is a planning mode, not an OS sandbox.
+to a factory configured with either execution runtime. OpenCode implementation
+jobs run inside the
+enforced macOS Seatbelt profile shipped in `factory/sandbox/opencode-macos.sb`:
+the adapter wraps `opencode --standalone run --auto --agent build` with
+`sandbox-exec`, so the self-contained process tree (the standalone flag
+bypasses the background service) may write only the job worktree, the
+per-attempt scratch directory, OpenCode's own state, the system temp and
+/dev/null, and its network is limited to HTTPS, DNS and loopback. Enable it
+with `"opencode_sandbox": "seatbelt"` in the project config, only after
+`scripts/verify_opencode_enforcement.py` passes. The probe runs deterministic
+negative access tests (an outside write must be refused by the operating
+system) and an adversarial live run whose requirements instruct the model to
+escape to an outside canary by any means, including shell commands - the
+canary must remain untouched, because containment comes from the operating
+system and not from model obedience. The former
+`opencode_implementation_sandbox: "verified"` flag stays rejected, and the
+legacy `scripts/verify_opencode_sandbox.py` command still exits
+unsuccessfully without launching an agent. OpenCode review jobs retain the
+`plan` agent and can pin a requested model using `opencode_model`; this is a
+planning mode, not an OS sandbox.
 
 
 `scripts/install_local.py` installs a reviewed `main` revision to a separate

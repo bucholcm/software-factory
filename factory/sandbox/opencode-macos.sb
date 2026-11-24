@@ -1,0 +1,35 @@
+;; macOS Seatbelt profile for OpenCode implementation runs (software-factory).
+;;
+;; Enforced write confinement for `opencode --standalone run`: the sandboxed
+;; process tree may write only to the job worktree, the per-attempt scratch
+;; directory, OpenCode's own state directories and the system temp area.
+;; Reads stay broadly allowed (the same posture as the Codex runtime);
+;; outbound network is limited to HTTPS and DNS so model traffic works and
+;; nothing else does. All paths arrive as sandbox-exec -D parameters and
+;; must be fully resolved (symlinks such as /tmp -> /private/tmp break
+;; subpath matching).
+;;
+;; Verification is adversarial, not cooperative: scripts/verify_opencode_enforcement.py
+;; instructs the live model to escape to an outside canary by any means and
+;; asserts the operating system refused. Config key: "opencode_sandbox":
+;; "seatbelt" (factory/config.py validates the value; the legacy
+;; "opencode_implementation_sandbox" flag stays rejected).
+
+(version 1)
+(allow default)
+(allow process-exec*)
+(deny file-write*)
+(allow file-write* (subpath (param "worktree")))
+(allow file-write* (subpath (param "scratch")))
+(allow file-write* (subpath (param "opencode-data")))
+(allow file-write* (subpath (param "opencode-cache")))
+(allow file-write* (subpath (param "opencode-config")))
+(allow file-write* (subpath (param "temp")))
+(allow file-write* (subpath "/private/tmp"))
+(allow file-write* (literal "/dev/null"))
+(deny network-outbound)
+(allow network-outbound (remote tcp "*:443"))
+(allow network-outbound (remote tcp "*:53"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder"))
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-inbound (local ip "localhost:*"))
